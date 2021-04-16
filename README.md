@@ -4,11 +4,11 @@ This project demonstrates the simple steps to integrate cert-manager, istio-csr,
 # Installation
 
 ## Installing on GetIstio
-Prior to installing ensure you have kubectl and the getistio CLIs installed.  Addtionally, you should already have a provisioned kubernetes cluster.
+Prior to installing ensure you have kubectl, helm, and getistio CLIs installed.  Addtionally, you should already have a provisioned kubernetes cluster.
 
 - `fetch` your desired Istio version utilizing `getistio fetch`.  You may also list the available version with the `getistio list` command
 ```bash
-getistio fetch --version 1.8.4 --flavor tetrate --flavor-version 0
+$ getistio fetch --version 1.8.4 --flavor tetrate --flavor-version 0
 
 Downloading 1.8.4-tetrate-v0 from https://tetrate.bintray.com/getistio/istio-1.8.4-tetrate-v0-osx.tar.gz ...
 Istio 1.8.4 Download Complete!
@@ -21,7 +21,9 @@ For more information about 1.8.4-tetrate-v0, please refer to the release notes:
 istioctl switched to 1.8.4-tetrate-v0 now
 ```
 - Install cert-manager into your cluster
-
+```bash
+helm install -n cert-manager cert-manager jetstack/cert-manager --set installCRDs=true
+```
 
 
 ## Installing on Tetrate Service Bridge (TSB)
