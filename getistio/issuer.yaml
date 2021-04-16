@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: istio-ca
+  namespace: istio-system
+spec:
+  venafi:
+    zone: Venafi Partners\Tetrate
+    tpp:
+      url: https://venafi-ecosystem-tpp.cld.sr/vedsdk # Change this to the URL of your TPP instance
+      #caBundle: <base64 encoded string of caBundle PEM file, or empty to use system root CAs>
+      credentialsRef:
+        name: tpp-secret
