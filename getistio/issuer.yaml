@@ -5,7 +5,7 @@ metadata:
   namespace: istio-system
 spec:
   venafi:
-    zone: Venafi Partners\Tetrate
+    zone: Venafi Partners\Tetrate # Set this to the Venafi policy zone you want to use
     tpp:
       url: https://venafi-ecosystem-tpp.cld.sr/vedsdk # Change this to the URL of your TPP instance
       #caBundle: <base64 encoded string of caBundle PEM file, or empty to use system root CAs>
