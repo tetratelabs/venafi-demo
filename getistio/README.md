@@ -4,7 +4,7 @@ This project demonstrates the simple steps to integrate cert-manager, istio-csr,
 # Installation
 
 ## Installing on GetIstio
-Prior to installing ensure you have kubectl, helm, and getistio CLIs installed.  Addtionally, you should already have a provisioned kubernetes cluster.
+Prior to installing ensure you have kubectl, helm, and getistio CLIs installed.  Additionally, you should already have a provisioned kubernetes cluster.
 
 - `fetch` your desired Istio version utilizing `getistio fetch`.  You may also list the available version with the `getistio list` command
 ```bash
