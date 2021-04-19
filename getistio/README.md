@@ -163,6 +163,4 @@ nginx   2/2     Running   0          22s
 
 - We can verify that we see the cerficiates issued and managed by Venafi.
 
-![alt text](https://raw.githubusercontent.com/tetratelabs/venafi-demo/main/images/venafi.png?token=ABGEIGOZVZYGQZ6GN7NKQVTAQ3HWO "Veanfi verification")
-
-https://github.com/tetratelabs/venafi-demo/blob/main/images/venafi.png
+![alt text](../images/venafi.png "Venafi verification")
