@@ -161,6 +161,6 @@ NAME    READY   STATUS    RESTARTS   AGE
 nginx   2/2     Running   0          22s 
 ```
 
-- We can verify that we see the cerficiates issued and managed by Venafi.
+- We can verify that we see the certificates issued and managed by Venafi.
 
 ![alt text](../images/venafi.png "Venafi verification")
