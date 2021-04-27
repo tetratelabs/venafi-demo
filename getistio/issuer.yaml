@@ -1,7 +1,7 @@
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: istio-ca
+  name: istio-ca-tpp
   namespace: istio-system
 spec:
   venafi:

@@ -1,0 +1,29 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: istio-ca
+  namespace: istio-system
+spec:
+  isCA: true
+  duration: 2160h # 90d
+  secretName: istio-ca
+  commonName: istio-ca.istio-system.svc.cluster.local
+  subject:
+    organizations:
+    - cluster.local
+    - cert-manager
+  issuerRef:
+    name: istio-ca-tpp
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: istio-ca
+  namespace: istio-system
+spec:
+  ca:
+    secretName: istio-ca
+
+
