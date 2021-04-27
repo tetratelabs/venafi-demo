@@ -206,6 +206,80 @@ Certificate:
          4d:ce:24:58:61:08:86:65:0d:f9:7d:25:ca:1c:09:38:60:7c:
          5a:4e:e2:d4:ce:cc:6f:0f:fb:06:bd:10:bc:ff:c1:16:cb:5b:
          9c:52:76:52
+getistio istioctl proxy-config secret nginx.default -o json | \
+    jq '.dynamicActiveSecrets[2].secret.validationContext.trustedCa.inlineBytes' | \
+    tr -d '"' | base64 -d | openssl x509 -text -noout
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            2f:00:04:19:31:58:7f:d6:b0:65:8a:41:c5:00:00:00:04:19:31
+    Signature Algorithm: sha256WithRSAEncryption
+        Issuer: DC=com, DC=venafidemo, CN=venafidemo-TPP-CA
+        Validity
+            Not Before: Apr 27 20:38:43 2021 GMT
+            Not After : Apr 27 20:48:43 2023 GMT
+        Subject: O=cert-manager, O=cluster.local, CN=istio-ca.istio-system.svc.cluster.local
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:e5:0e:d8:d0:34:e3:09:5f:d9:71:b4:8c:15:bd:
+                    f6:e4:cd:ec:b6:ee:3a:d1:4b:2c:43:2b:d6:f8:0d:
+                    ea:03:56:bc:98:c1:69:74:cd:d9:2b:ea:2b:ec:52:
+                    c5:55:ff:57:c4:74:e1:4b:be:15:c0:99:1c:bf:79:
+                    f2:b6:96:68:4c:67:1c:bf:54:72:40:08:b9:64:df:
+                    07:a6:64:2d:4d:e1:a4:a2:cc:e4:2e:6b:16:b7:a2:
+                    75:5f:60:36:db:a0:c7:bb:17:5f:4a:74:91:e2:ab:
+                    4c:1a:b2:dd:b4:f6:77:86:af:75:7b:2e:9f:9b:03:
+                    34:d2:c2:e5:a7:45:f4:53:d8:d7:8e:ed:10:9d:c8:
+                    13:83:03:af:f3:54:47:a5:a9:5f:fa:f1:62:36:79:
+                    7a:eb:40:e5:6f:06:2e:6b:4e:6f:a9:83:7c:e5:24:
+                    03:8c:e6:08:f7:a4:05:41:c9:84:84:64:f7:6f:f7:
+                    ab:6b:f5:21:b2:df:49:6c:fd:dd:00:3c:aa:e5:df:
+                    64:71:05:1d:1e:6b:1a:cd:0a:10:c8:7c:40:98:f5:
+                    2d:3d:a6:4a:fe:7f:3b:82:31:95:1e:1b:e9:a8:37:
+                    3c:d4:44:85:74:1d:c3:31:c4:9c:9a:e2:1d:49:94:
+                    40:45:01:9e:02:25:0e:86:0d:4a:4a:6c:e0:47:3d:
+                    5c:35
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Digital Signature, Certificate Sign, CRL Sign
+            X509v3 Subject Key Identifier: 
+                4E:EC:6D:75:DB:64:F8:ED:EA:7F:8A:CB:61:76:60:BC:AD:EC:EE:C3
+            X509v3 Authority Key Identifier: 
+                keyid:83:75:7A:54:58:18:B8:22:1D:28:77:BE:ED:E5:29:3F:D8:A1:F5:FE
+
+            X509v3 CRL Distribution Points: 
+
+                Full Name:
+                  URI:ldap:///CN=venafidemo-TPP-CA,CN=tpp,CN=CDP,CN=Public%20Key%20Services,CN=Services,CN=Configuration,DC=venafidemo,DC=com?certificateRevocationList?base?objectClass=cRLDistributionPoint
+
+            Authority Information Access: 
+                CA Issuers - URI:ldap:///CN=venafidemo-TPP-CA,CN=AIA,CN=Public%20Key%20Services,CN=Services,CN=Configuration,DC=venafidemo,DC=com?cACertificate?base?objectClass=certificationAuthority
+
+            1.3.6.1.4.1.311.20.2: 
+                .
+.S.u.b.C.A
+            X509v3 Basic Constraints: critical
+                CA:TRUE
+    Signature Algorithm: sha256WithRSAEncryption
+         7e:d2:44:98:c0:69:7f:cb:a4:c4:09:31:a1:63:a3:2e:d6:74:
+         cc:75:de:9d:2e:86:54:f8:31:76:d8:54:91:ba:d3:10:0b:3e:
+         e4:bb:34:60:ee:64:a6:cd:e1:d3:da:6b:dd:63:46:b7:75:46:
+         84:2a:5e:e1:51:0b:dd:d3:87:d0:71:af:07:64:6f:e3:13:54:
+         d4:41:da:7b:6b:72:df:82:34:0b:64:6e:37:67:4a:46:6f:68:
+         9d:f0:db:79:24:40:0d:a3:73:68:01:ea:23:e9:d8:36:6d:5b:
+         bb:96:25:71:77:67:57:d2:7d:98:ed:dd:76:a6:42:9f:52:9f:
+         f1:70:8c:f0:bb:ac:5e:ca:d8:a2:0f:b2:30:f2:08:70:2f:bc:
+         c2:35:cd:f0:41:58:5e:99:ad:68:5c:9c:1f:89:a9:0e:b3:9a:
+         b0:40:b7:f9:9f:b3:1c:1e:a5:1d:c0:98:e3:4c:30:6b:11:18:
+         24:50:79:cb:d8:f2:19:4a:ce:51:ec:ec:3c:b9:59:5b:d6:82:
+         4a:d7:bb:74:26:f6:78:ae:f0:23:59:8a:f1:d6:bb:67:92:66:
+         84:31:ad:e1:9d:30:ee:ae:91:ec:7b:85:00:09:37:c1:22:10:
+         e3:02:81:27:7e:6d:48:10:01:a7:ee:51:36:46:13:7d:15:de:
+         00:f9:26:90
 ```
 
 ## Deploying an Istio IngressGateway
