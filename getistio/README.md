@@ -211,7 +211,7 @@ $ getistio istioctl proxy-config secret nginx.default -o json | \
     jq '.dynamicActiveSecrets[1].secret.validationContext.trustedCa.inlineBytes' | \
     tr -d '"' | base64 -d | openssl x509 -text -noout
        
-ertificate:
+Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
