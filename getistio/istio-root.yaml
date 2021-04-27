@@ -25,5 +25,3 @@ metadata:
 spec:
   ca:
     secretName: istio-ca
-
-

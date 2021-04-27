@@ -208,48 +208,47 @@ Certificate:
          9c:52:76:52
 
 $ getistio istioctl proxy-config secret nginx.default -o json | \
-    jq '.dynamicActiveSecrets[1].secret.validationContext.trustedCa.inlineBytes' | \
+    jq '.dynamicActiveSecrets[2].secret.validationContext.trustedCa.inlineBytes' | \
     tr -d '"' | base64 -d | openssl x509 -text -noout
-       
 Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            2f:00:04:19:26:e9:97:fe:50:5e:01:5f:18:00:00:00:04:19:26
+            2f:00:04:19:31:58:7f:d6:b0:65:8a:41:c5:00:00:00:04:19:31
     Signature Algorithm: sha256WithRSAEncryption
         Issuer: DC=com, DC=venafidemo, CN=venafidemo-TPP-CA
         Validity
-            Not Before: Apr 27 13:52:04 2021 GMT
-            Not After : Apr 27 14:02:04 2023 GMT
+            Not Before: Apr 27 20:38:43 2021 GMT
+            Not After : Apr 27 20:48:43 2023 GMT
         Subject: O=cert-manager, O=cluster.local, CN=istio-ca.istio-system.svc.cluster.local
         Subject Public Key Info:
             Public Key Algorithm: rsaEncryption
                 Public-Key: (2048 bit)
                 Modulus:
-                    00:c3:ac:4f:42:3b:5d:fd:f1:ac:ad:fc:21:7a:1e:
-                    cc:dc:bf:66:e6:37:4c:ed:77:19:a1:63:fd:0c:0b:
-                    76:58:db:3a:02:2a:bc:c9:6f:a4:14:5f:0b:97:95:
-                    1a:c8:03:42:32:05:ea:bf:b7:dd:6d:5a:84:83:79:
-                    ed:16:c8:ab:d7:4c:be:1c:e8:06:06:fd:53:9a:9b:
-                    cd:0e:90:16:ff:75:cd:01:93:7b:4a:94:78:2f:1a:
-                    50:39:87:18:b5:81:cf:7f:2f:db:ad:6b:0b:d4:14:
-                    6b:c8:da:88:92:8e:62:b3:84:23:72:7f:ba:da:08:
-                    78:cc:78:5e:29:37:10:4f:8d:ac:fd:fb:a7:33:f0:
-                    4c:eb:2c:40:0c:25:d7:0a:3d:93:14:9c:ff:ef:27:
-                    43:2b:b2:71:77:d3:24:b2:83:6a:ed:5d:b4:e9:61:
-                    0d:f3:56:9d:50:a5:5a:af:23:6b:b0:32:79:1d:c6:
-                    4a:d1:07:c8:6f:72:0b:a8:ed:65:8e:cb:8c:d5:dc:
-                    75:33:9d:80:fd:35:fe:2e:83:45:b0:da:12:a9:bb:
-                    be:09:e9:bc:ea:40:9b:39:f2:08:62:2a:df:f3:38:
-                    20:8b:66:79:77:8b:49:73:08:d0:59:57:b7:97:ab:
-                    cc:38:6b:44:9e:b3:5f:35:28:53:c6:1f:b2:8a:60:
-                    97:5b
+                    00:e5:0e:d8:d0:34:e3:09:5f:d9:71:b4:8c:15:bd:
+                    f6:e4:cd:ec:b6:ee:3a:d1:4b:2c:43:2b:d6:f8:0d:
+                    ea:03:56:bc:98:c1:69:74:cd:d9:2b:ea:2b:ec:52:
+                    c5:55:ff:57:c4:74:e1:4b:be:15:c0:99:1c:bf:79:
+                    f2:b6:96:68:4c:67:1c:bf:54:72:40:08:b9:64:df:
+                    07:a6:64:2d:4d:e1:a4:a2:cc:e4:2e:6b:16:b7:a2:
+                    75:5f:60:36:db:a0:c7:bb:17:5f:4a:74:91:e2:ab:
+                    4c:1a:b2:dd:b4:f6:77:86:af:75:7b:2e:9f:9b:03:
+                    34:d2:c2:e5:a7:45:f4:53:d8:d7:8e:ed:10:9d:c8:
+                    13:83:03:af:f3:54:47:a5:a9:5f:fa:f1:62:36:79:
+                    7a:eb:40:e5:6f:06:2e:6b:4e:6f:a9:83:7c:e5:24:
+                    03:8c:e6:08:f7:a4:05:41:c9:84:84:64:f7:6f:f7:
+                    ab:6b:f5:21:b2:df:49:6c:fd:dd:00:3c:aa:e5:df:
+                    64:71:05:1d:1e:6b:1a:cd:0a:10:c8:7c:40:98:f5:
+                    2d:3d:a6:4a:fe:7f:3b:82:31:95:1e:1b:e9:a8:37:
+                    3c:d4:44:85:74:1d:c3:31:c4:9c:9a:e2:1d:49:94:
+                    40:45:01:9e:02:25:0e:86:0d:4a:4a:6c:e0:47:3d:
+                    5c:35
                 Exponent: 65537 (0x10001)
         X509v3 extensions:
             X509v3 Key Usage: critical
                 Digital Signature, Certificate Sign, CRL Sign
             X509v3 Subject Key Identifier: 
-                84:F1:76:E5:45:40:BB:06:04:29:DA:BD:81:80:8D:00:9A:A4:7D:CD
+                4E:EC:6D:75:DB:64:F8:ED:EA:7F:8A:CB:61:76:60:BC:AD:EC:EE:C3
             X509v3 Authority Key Identifier: 
                 keyid:83:75:7A:54:58:18:B8:22:1D:28:77:BE:ED:E5:29:3F:D8:A1:F5:FE
 
@@ -267,19 +266,19 @@ Certificate:
             X509v3 Basic Constraints: critical
                 CA:TRUE
     Signature Algorithm: sha256WithRSAEncryption
-         24:09:c7:0f:a7:06:c1:e1:d2:b5:2c:99:9f:35:14:b7:22:6c:
-         d2:0a:03:63:91:3d:d8:36:bb:7e:11:96:73:73:e5:7c:7f:0a:
-         25:56:6b:56:d2:48:dc:10:9e:cf:3f:33:5a:46:52:65:4c:67:
-         cf:42:a2:ba:95:e4:27:c3:6c:fa:e9:7c:66:b6:74:43:78:b4:
-         29:1b:2e:72:06:33:39:19:ad:a4:4e:7b:83:8d:08:c0:1c:55:
-         d2:2a:ba:03:0d:44:fc:6e:26:e3:9b:96:b7:cf:00:1d:36:fe:
-         1f:af:a0:90:52:f1:64:b8:54:90:f4:6a:90:28:e9:46:0d:e4:
-         6e:5c:77:fe:d5:85:19:b2:ee:b5:02:53:c4:7d:d4:a4:f0:c2:
-         92:3e:62:d5:9c:8e:a1:e4:44:1e:bb:bb:c6:05:3b:9e:53:dc:
-         98:7c:24:c1:f0:79:c4:f8:bc:45:96:ef:fa:b1:c9:c8:aa:ec:
-         21:55:28:0c:e3:81:55:7c:b4:3a:0e:18:a6:fb:be:99:02:33:
-         bd:cd:ab:f2:1a:35:88:19:06:4a:2f:55:b1:01:f2:7a:fb:63:
-         94:30:88:63:be:04:81:9f:20:d2:4e:2f:1d:00:35:10:7c:15:
-         88:bd:ba:04:3f:b8:d6:3e:67:3f:00:16:52:da:75:7c:18:72:
-         73:5b:13:74
+         7e:d2:44:98:c0:69:7f:cb:a4:c4:09:31:a1:63:a3:2e:d6:74:
+         cc:75:de:9d:2e:86:54:f8:31:76:d8:54:91:ba:d3:10:0b:3e:
+         e4:bb:34:60:ee:64:a6:cd:e1:d3:da:6b:dd:63:46:b7:75:46:
+         84:2a:5e:e1:51:0b:dd:d3:87:d0:71:af:07:64:6f:e3:13:54:
+         d4:41:da:7b:6b:72:df:82:34:0b:64:6e:37:67:4a:46:6f:68:
+         9d:f0:db:79:24:40:0d:a3:73:68:01:ea:23:e9:d8:36:6d:5b:
+         bb:96:25:71:77:67:57:d2:7d:98:ed:dd:76:a6:42:9f:52:9f:
+         f1:70:8c:f0:bb:ac:5e:ca:d8:a2:0f:b2:30:f2:08:70:2f:bc:
+         c2:35:cd:f0:41:58:5e:99:ad:68:5c:9c:1f:89:a9:0e:b3:9a:
+         b0:40:b7:f9:9f:b3:1c:1e:a5:1d:c0:98:e3:4c:30:6b:11:18:
+         24:50:79:cb:d8:f2:19:4a:ce:51:ec:ec:3c:b9:59:5b:d6:82:
+         4a:d7:bb:74:26:f6:78:ae:f0:23:59:8a:f1:d6:bb:67:92:66:
+         84:31:ad:e1:9d:30:ee:ae:91:ec:7b:85:00:09:37:c1:22:10:
+         e3:02:81:27:7e:6d:48:10:01:a7:ee:51:36:46:13:7d:15:de:
+         00:f9:26:90
 ```
