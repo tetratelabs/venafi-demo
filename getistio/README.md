@@ -87,7 +87,7 @@ istio-system   istiod     True    istiod-tls   15s
 
 ![alt text](../images/venafi.png "Venafi verification")
 
-- Install Istio using the GetIstio cli using a `IstioOperator` deployment description.  Depending on the version of Istio you are targeting you will need to configure the deployment slightly different.  For Istio v1.7.x, utilize the file `getistio/istio-operator-1.7.yaml`.  For Istio v1.8.x and higher, utilize the file `getistio/istio-operator-1.8.yaml`.  By inspecting the `IstioOperator` yaml descriptor you'll note that a) the Istio CA Server is disabled, b) cert-manager certificates are being mounted into pods, and c) Istio is being direct to call the external address of `cert-manager-istio-csr.cert-manager.svc:443` for certificates.
+- Install Istio using the GetIstio cli using a `IstioOperator` deployment description.  By inspecting the `IstioOperator` yaml descriptor you'll note that a) the Istio CA Server is disabled, b) cert-manager certificates are being mounted into pods, and c) Istio is being direct to call the external address of `cert-manager-istio-csr.cert-manager.svc:443` for certificates.
 ```bash
 $ getistio istioctl install -f getistio/istio-operator-1.8.yaml 
 
