@@ -1,0 +1,104 @@
+---
+apiVersion: install.tetrate.io/v1alpha1
+kind: ControlPlane
+metadata:
+  name: controlplane
+  namespace: istio-system
+spec:
+  hub: gcr.io/abz-env
+  components:
+    istio:
+      kubeSpec:
+        overlays:
+          - apiVersion: install.istio.io/v1alpha1
+            kind: IstioOperator
+            name: tsb-istiocontrolplane
+            patches:
+            - path: spec.values.global.caAddress
+              value: cert-manager-istio-csr.cert-manager.svc:443
+            - path: spec.components.pilot.k8s.env
+              value:
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      apiVersion: v1
+                      fieldPath: metadata.name
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      apiVersion: v1
+                      fieldPath: metadata.namespace
+                - name: HTTP10
+                  value: "true"
+                - name: PILOT_ENABLE_MYSQL_FILTER
+                  value: "false"
+                - name: PILOT_ENABLE_REDIS_FILTER
+                  value: "false"
+                - name: PILOT_PUSH_THROTTLE
+                  value: "100"
+                - name: PILOT_SCOPE_GATEWAY_TO_NAMESPACE
+                  value: "true"
+                - name: PILOT_ENABLE_PROTOCOL_SNIFFING_FOR_OUTBOUND
+                  value: "true"
+                - name: PILOT_ENABLE_PROTOCOL_SNIFFING_FOR_INBOUND
+                  value: "true"
+                - name: PILOT_ENABLE_STATUS
+                  value: "false"
+                - name: INJECTION_WEBHOOK_CONFIG_NAME
+                  value: istio-sidecar-injector
+                - name: ISTIOD_ADDR
+                  value: istiod.istio-system.svc:15012
+                - name: PILOT_EXTERNAL_GALLEY
+                  value: "false"
+                - name: PILOT_FILTER_GATEWAY_CLUSTER_CONFIG
+                  value: "true"
+                - name: ENABLE_CA_SERVER
+                  value: "false"
+            - path: spec.components.pilot.k8s.overlays
+              value:
+              - apiVersion: apps/v1
+                kind: Deployment
+                name: istiod
+                patches:
+                # Mount istiod serving and webhook certificate from Secret mount
+                - path: spec.template.spec.containers.[name:discovery].args[8]
+                  value: "--tlsCertFile=/etc/cert-manager/tls/tls.crt"
+                - path: spec.template.spec.containers.[name:discovery].args[9]
+                  value: "--tlsKeyFile=/etc/cert-manager/tls/tls.key"
+                - path: spec.template.spec.containers.[name:discovery].args[10]
+                  value: "--caCertFile=/etc/cert-manager/ca/root-cert.pem"
+                  
+                  #Volume Mounts into the container
+                - path: spec.template.spec.containers.[name:discovery].volumeMounts[6]
+                  value:
+                    name: cert-manager
+                    mountPath: "/etc/cert-manager/tls"
+                    readOnly: true
+                - path: spec.template.spec.containers.[name:discovery].volumeMounts[7]
+                  value:
+                    name: ca-root-cert
+                    mountPath: "/etc/cert-manager/ca"
+                    readOnly: true
+
+                  # Volumes
+                - path: spec.template.spec.volumes[6]
+                  value:
+                    name: cert-manager
+                    secret:
+                      secretName: istiod-tls
+                - path: spec.template.spec.volumes[7]
+                  value:
+                    name: ca-root-cert
+                    configMap:
+                      secretName: istiod-tls
+                      defaultMode: 420
+                      name: istio-ca-root-cert
+  telemetryStore:
+    elastic:
+      host: tsb.demo.zwickey.net
+      port: 443
+  managementPlane:
+    host: tsb.demo.zwickey.net
+    port: 443
+    clusterName: venafi-test
+    tenant: tetrate

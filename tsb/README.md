@@ -6,7 +6,6 @@ This project demonstrates the simple steps to integrate cert-manager, istio-csr,
 ## Installing on Tetrate Service Bridge (TSB)
 Prior to installing ensure you have kubectl, helm, and Tetate tctl CLIs installed.  Additionally, you should already have a provisioned kubernetes cluster and have an available TSB Management Plane.  These steps assume you are onboarding a cluster named `venafi-test`.  If you are changing the name of you cluster you will need to replace `venafi-test` with your updated cluster name in all commands and yaml files.
 
-```
 - Install cert-manager into your cluster
 ```bash
 $ helm repo add jetstack https://charts.jetstack.io
@@ -24,12 +23,12 @@ $ kubectl create secret generic \
    --from-literal=access-token='TOP_SECRET_TOKEN'
 ```
 
-- Deploy the Venafi `Issuer` for cert-manager.  You will need to update `getistio/issuer.yaml` to contain your correct Venafi Policy Zone and TPP URL.
+- Deploy the Venafi `Issuer` for cert-manager.  You will need to update `tsb/issuer.yaml` to contain your correct Venafi Policy Zone and TPP URL.
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: istio-ca
+  name: istio-ca-tpp
   namespace: istio-system
 spec:
   venafi:
@@ -48,43 +47,18 @@ $ kubectl apply -f tsb/issuer.yaml
 $ kubectl get issuers.cert-manager.io -A
 
 NAMESPACE      NAME       READY   AGE
-istio-system   istio-ca   True    30s
+istio-system   istio-ca-tpp   True    30s
 ```
 
-- Install the [istio-csr](https://github.com/cert-manager/istio-csr), which allows cert-manager to issue workload certificates for Istio.  `certificate.preserveCertificateRequests` is helpful to debug if the certificate issuing is not working as expected later.  
+- Utilize the Venafi Issuer to create an Istio intermediate certificate, which will be used to create a local issuer for Istio workload certificates.
 ```bash
-$ helm install -n cert-manager cert-manager-istio-csr jetstack/cert-manager-istio-csr --set certificate.preserveCertificateRequests=true 
+$ kubectl apply -f tsb/istio-root.yaml
 ```
 
-- There is currently an issue that causes the initial certificate issued to Istiod to fail with a message indicating that you must supply a commonName or atleast one subject field:
+- Install the [istio-csr](https://github.com/cert-manager/istio-csr), which allows cert-manager to issue workload certificates for Istio.  `certificate.preserveCertificateRequests` is helpful to debug if the certificate issuing is not working as expected later. If you are not using the default clusterId edit the `agent.clusterId` parameter accordingly. 
 ```bash
-$ kubectl get certificate istiod -n istio-system -o json | jq .status                                                                                                    ─╯
-{
-  "conditions": [
-    {
-      "lastTransitionTime": "2021-04-19T13:46:29Z",
-      "message": "Issuing certificate as Secret does not exist",
-      "observedGeneration": 1,
-      "reason": "DoesNotExist",
-      "status": "False",
-      "type": "Ready"
-    },
-    {
-      "lastTransitionTime": "2021-04-19T13:46:31Z",
-      "message": "The certificate request has failed to complete and will be retried: Failed to request venafi certificate: Certificate requests submitted to Venafi issuers must have the 'commonName' field or at least one other subject field set.",
-      "observedGeneration": 1,
-      "reason": "Failed",
-      "status": "False",
-      "type": "Issuing"
-    }
-  ],
-  "lastFailureTime": "2021-04-19T13:46:31Z"
-```
-
-To resolve this you can patch the `Certificate` with the default istio service fqdn of `istiod.istio-system.svc`:
-```bash
-$ kubectl patch certificate -n istio-system istiod \
-   --patch '{"spec":{"commonName":"istiod.istio-system.svc"}}' --type merge
+$ helm install -n cert-manager cert-manager-istio-csr jetstack/cert-manager-istio-csr \
+  --set certificate.preserveCertificateRequests=true --set agent.clusterID=venafi-test
 ```
 
 - Lastly, verify that the root istiod certificate has been signed and is in `Ready` state:
@@ -94,6 +68,10 @@ $ kubectl get certificate -A
 NAMESPACE      NAME     READY   SECRET       AGE
 istio-system   istiod   True    istiod-tls   50s
 ```
+
+- We can verify that we see the certificates issued and managed by Venafi.
+
+![alt text](../images/venafi.png "Venafi verification")
 
 - Istio will be lifecycle-managed by TSB.  Prior to onboarding the cluser into TSB you will need to create cluster certs and secrets that will be used to connect securely into the TSB management plane.  Using the tctl CLI generate these files.  ** NOTE ** your kubernetes context must be set to your TSB management cluster when executing these commands:
 ```bash
@@ -113,10 +91,43 @@ $ tctl install manifest cluster-operator  --registry $CONTAINER-REGISTRY > tsb/c
 $ kubectl apply -f tsb/cp-operator.yaml 
 ```
 
+- Utilize the `tctl` clt to register the cluster object with the TSB management plane.  In this step, edit the `tsb/cluster.yaml` file if you have changed the cluster name from the default:
+```bash
+$ tctl apply -f tsb/cluster.yaml
+
+$ tctl get clusters
+NAME                DISPLAY NAME    DESCRIPTION 
+tsb-mgmt                                           
+venafi-test                                        
+gke-cluster-east                                   
+gke-cluster-west 
+```
+
+- Lastly, we need to create the local Istio Control Plane by applying the `tsb/control-plane.yaml` to the local cluster.  There are a few meta-data items at the end of the file that will need to be updated according to your env.  After updating apply with `kubectl`
+```yaml
+---
+apiVersion: install.tetrate.io/v1alpha1
+kind: ControlPlane
+....
+....
+  telemetryStore:
+    elastic:
+      host: tsb.demo.zwickey.net  # Update according to your env
+      port: 443 # Update according to your env
+  managementPlane:
+    host: tsb.demo.zwickey.net # Update according to your env
+    port: 443 # Update according to your env
+    clusterName: venafi-test # Update if you've changed the default name
+    tenant: tetrate # Update according to your env
+```
+```bash
+$ kubectl apply -f tsb/control-plane.yaml  
+```
+
 ## Verifying the Integration
 - Label a kubernetes namespace with `istio-injection=enabled`
 ```bash
-$ kubectl label ns default istio-injection=enabled --overwrite  
+$ kubectl label ns default istio-injection=enabled
 ```
 
 - Run a sample pod to verify that istio injects a sidecar container.
@@ -129,6 +140,85 @@ NAME    READY   STATUS    RESTARTS   AGE
 nginx   2/2     Running   0          22s 
 ```
 
-- We can verify that we see the certificates issued and managed by Venafi.
+- We can verify that the workload certificate was issued from the Venafi chain of trust by inspecting the secrets injected into the sidecar using `istioclt`:
+```bash
+$ getistio istioctl proxy-config secret nginx.default -o json | \
+   jq '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
+   tr -d '"' | base64 -d | openssl x509 -text -noout
+       
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            e4:ff:96:80:3c:c6:b6:36:3a:19:e2:a1:da:26:81:1f
+    Signature Algorithm: sha256WithRSAEncryption
+        Issuer: O=cert-manager, O=cluster.local, CN=istio-ca.istio-system.svc.cluster.local
+        Validity
+            Not Before: Apr 27 15:29:31 2021 GMT
+            Not After : Apr 28 15:29:31 2021 GMT
+        Subject: O=
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:d9:0c:db:59:31:e8:97:d4:46:06:ef:07:18:68:
+                    b9:8a:73:4d:55:1e:c4:0d:ab:96:70:2e:70:9e:df:
+                    87:3b:7d:2d:5c:6a:a6:cd:75:a4:2b:f7:9d:ab:78:
+                    43:4d:e9:ab:01:96:60:bd:cc:bc:da:3c:7c:51:fa:
+                    b9:f4:07:f0:8c:39:ca:94:48:2e:f0:0f:c5:01:5f:
+                    b0:08:a2:f7:16:f6:29:13:26:d5:5c:1e:94:8a:f6:
+                    d0:d5:e7:37:5a:7c:4c:87:01:0d:7e:10:c7:0f:98:
+                    1d:ab:50:5e:42:f3:15:14:8e:68:28:d3:70:9d:ba:
+                    5c:52:e0:17:3b:b5:0e:29:aa:17:72:31:3a:4a:1c:
+                    08:36:63:0b:34:b9:82:cc:b1:21:14:e3:f9:57:07:
+                    54:4a:e3:af:25:8d:66:0c:1e:71:bb:34:72:2c:c5:
+                    85:c9:19:6c:75:3f:14:7b:71:bc:91:be:59:38:ce:
+                    42:ac:f3:07:c6:0c:cf:cb:c7:0a:81:8d:60:e3:62:
+                    15:dc:5b:a6:fc:71:79:b5:ca:e2:60:ca:f3:ef:6b:
+                    fe:0e:93:09:bb:79:7b:12:07:30:d4:c0:b8:6c:6b:
+                    54:6c:55:62:c9:8d:9d:ea:74:33:86:9e:f1:fc:b9:
+                    3d:27:ac:ed:b2:53:2e:4e:8c:fc:cf:a9:c7:6f:cf:
+                    32:69
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Extended Key Usage: 
+                TLS Web Client Authentication, TLS Web Server Authentication
+            X509v3 Basic Constraints: critical
+                CA:FALSE
+            X509v3 Authority Key Identifier: 
+                keyid:84:F1:76:E5:45:40:BB:06:04:29:DA:BD:81:80:8D:00:9A:A4:7D:CD
 
-![alt text](../images/venafi.png "Venafi verification")
+            X509v3 Subject Alternative Name: 
+                URI:spiffe://cluster.local/ns/default/sa/default
+    Signature Algorithm: sha256WithRSAEncryption
+         99:74:56:6a:f6:a9:ac:f9:51:13:76:fd:20:8a:ef:28:e7:21:
+         19:df:16:5b:7f:8f:49:d2:c5:c2:94:8f:68:da:f8:7e:54:81:
+         f6:f4:2e:12:00:ea:63:ba:cb:b7:7f:91:45:8d:53:e0:59:6b:
+         36:8e:45:82:d0:95:3d:6a:c4:08:fc:d1:a8:10:ed:d3:d9:13:
+         90:7f:a7:3e:aa:12:8b:86:4d:50:1e:9f:38:7a:26:d2:59:2f:
+         03:09:34:0b:f0:19:b3:14:06:ab:6b:91:82:a9:d2:cb:4a:33:
+         8f:22:df:d1:60:09:a0:86:2d:54:9d:ae:c5:d7:ce:67:a0:db:
+         d8:31:e5:7c:1f:a1:aa:91:25:30:12:7b:fd:12:59:d9:4d:b1:
+         e9:1a:57:85:37:1c:f4:a2:87:e8:40:ee:80:eb:db:78:9a:f9:
+         2e:d1:90:e2:3e:6a:22:fd:42:ec:5e:e0:9a:c0:b1:8f:b3:1e:
+         bf:ef:39:db:c5:96:4f:47:0d:19:d7:fd:02:b6:60:25:7e:ca:
+         79:55:5a:71:a7:fc:81:98:33:a4:e2:c8:6c:59:33:ba:0b:d7:
+         4d:ce:24:58:61:08:86:65:0d:f9:7d:25:ca:1c:09:38:60:7c:
+         5a:4e:e2:d4:ce:cc:6f:0f:fb:06:bd:10:bc:ff:c1:16:cb:5b:
+         9c:52:76:52
+```
+
+## Deploying an Istio IngressGateway
+- Deploy the IngressGateway using the Tetrate installation customer resource found in `tsb/cluster-ingress-gw.yaml`
+```bash
+$ kubectl apply -f tsb/cluster-ingress-gw.yaml 
+```
+
+- Patch the `IstioOperator` that installs the ingress gateway to utilize cert-manager:
+```bash
+$ kubectl patch istiooperators.install.istio.io tsb-gateways \
+   --patch '{"spec":{"values":{"global":{"caAddress":"cert-manager-istio-csr.cert-manager.svc:443"}}}}' \
+   --type merge -n istio-gateway
+```
+
+

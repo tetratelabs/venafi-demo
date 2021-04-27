@@ -1,0 +1,8 @@
+---
+apiVersion: api.tsb.tetrate.io/v2
+kind: Cluster
+metadata:
+  name: venafi-test
+  organization: tetrate
+spec:
+  tokenTtl: "10000h"

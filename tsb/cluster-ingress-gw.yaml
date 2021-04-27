@@ -1,0 +1,15 @@
+---
+apiVersion: install.tetrate.io/v1alpha1
+kind: IngressGateway
+metadata:
+  name: tsb-gateway
+  namespace: default
+spec:
+  kubeSpec:
+    # overlays:
+    # - apiVersion: install.istio.io/v1alpha1
+    #   kind: IstioOperator
+    #   name: tsb-gateways
+    #   patches:
+    #   - path: spec.values.global.caAddress
+    #     value: cert-manager-istio-csr.cert-manager.svc:443
