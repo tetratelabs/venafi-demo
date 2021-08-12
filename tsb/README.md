@@ -128,7 +128,19 @@ kind: ControlPlane
 ```bash
 $ kubectl apply -f tsb/control-plane.yaml  
 ```
+---
+**NOTE**
 
+For existing TSB `controlplane`, when updating the control plane with the istio overlay `kubectl edit controlplane -n istio-system controlplane`, sidecars give the error below
+
+```bash
+Error creating: Internal error occurred: failed calling webhook "sidecar-injector.istio.io": Post "https://istiod.istio-system.svc:443/inject?timeout=30s": x509: certificate signed by unknown authority
+```
+Restart the istiod pod to fix this issue
+```bash
+kubectl -n istio-system patch deployment istiod \
+    -p "{\"spec\":{\"template\":{\"metadata\":{\"labels\":{\"date\":\"`date +'%s'`\"}}}}}"
+```
 ## Verifying the Integration
 - Label a kubernetes namespace with `istio-injection=enabled`
 ```bash
