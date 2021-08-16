@@ -3,22 +3,22 @@ This project demonstrates the simple steps to integrate cert-manager, istio-csr,
 
 # Installation
 
-## Installing on GetIstio
-Prior to installing ensure you have kubectl, helm, and getistio CLIs installed.  Additionally, you should already have a provisioned kubernetes cluster.
+## Installing on getmesh
+Prior to installing ensure you have kubectl, helm, and getmesh CLIs installed.  Additionally, you should already have a provisioned kubernetes cluster.
 
-- `fetch` your desired Istio version utilizing `getistio fetch`.  You may also list the available version with the `getistio list` command
+- `fetch` your desired Istio version utilizing `getmesh fetch`.  You may also list the available version with the `getmesh list` command
 ```bash
-$ getistio fetch --version 1.8.4 --flavor tetrate --flavor-version 0
+$ getmesh fetch --version 1.8.5 --flavor tetrate --flavor-version 0
 
-Downloading 1.8.4-tetrate-v0 from https://tetrate.bintray.com/getistio/istio-1.8.4-tetrate-v0-osx.tar.gz ...
-Istio 1.8.4 Download Complete!
+Downloading 1.8.5-tetrate-v0 from https://istio.tetratelabs.io/getmesh/files/istio-1.8.5-tetrate-v0-osx.tar.gz ...
+Istio 1.8.5 Download Complete!
 
 Istio has been successfully downloaded into your system.
 
-For more information about 1.8.4-tetrate-v0, please refer to the release notes: 
-- https://istio.io/latest/news/releases/1.8.x/announcing-1.8.4/
+For more information about 1.8.5-tetrate-v0, please refer to the release notes: 
+- https://istio.io/latest/news/releases/1.8.x/announcing-1.8.5/
 
-istioctl switched to 1.8.4-tetrate-v0 now
+istioctl switched to 1.8.5-tetrate-v0 now
 ```
 - Install cert-manager into your cluster
 ```bash
@@ -37,7 +37,7 @@ $ kubectl create secret generic \
    --from-literal=access-token='TOP_SECRET_TOKEN'
 ```
 
-- Deploy the Venafi `Issuer` for cert-manager.  You will need to update `getistio/issuer.yaml` to contain your correct Venafi Policy Zone and TPP URL.
+- Deploy the Venafi `Issuer` for cert-manager.  You will need to update `getmesh/issuer.yaml` to contain your correct Venafi Policy Zone and TPP URL.
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -53,7 +53,7 @@ spec:
         name: tpp-secret
 ```
 ```bash
-$ kubectl apply -f getistio/issuer.yaml
+$ kubectl apply -f getmesh/issuer.yaml
 ```
 
 - Verify that your cert-manager Issuer for Venafi is in the `Ready` state.
@@ -66,7 +66,7 @@ istio-system   istio-ca-tpp   True    30s
 
 - Utilize the Venafi Issuer to create an Istio intermediate certificate, which will be used to create a local issuer for Istio workload certificates.
 ```bash
-$ kubectl apply -f getistio/istio-root.yaml
+$ kubectl apply -f getmesh/istio-root.yaml
 ```
 
 - Install the [istio-csr](https://github.com/cert-manager/istio-csr), which allows cert-manager to issue workload certificates for Istio.  `certificate.preserveCertificateRequests` is helpful to debug if the certificate issuing is not working as expected later.  
@@ -87,9 +87,9 @@ istio-system   istiod     True    istiod-tls   15s
 
 ![alt text](../images/venafi.png "Venafi verification")
 
-- Install Istio using the GetIstio cli using a `IstioOperator` deployment description.  By inspecting the `IstioOperator` yaml descriptor you'll note that a) the Istio CA Server is disabled, b) cert-manager certificates are being mounted into pods, and c) Istio is being direct to call the external address of `cert-manager-istio-csr.cert-manager.svc:443` for certificates.
+- Install Istio using the getmesh cli using a `IstioOperator` deployment description.  By inspecting the `IstioOperator` yaml descriptor you'll note that a) the Istio CA Server is disabled, b) cert-manager certificates are being mounted into pods, and c) Istio is being direct to call the external address of `cert-manager-istio-csr.cert-manager.svc:443` for certificates.
 ```bash
-$ getistio istioctl install -f getistio/istio-operator-1.8.yaml 
+$ getmesh istioctl install -f getmesh/istio-operator-1.8.yaml 
 
 Checking the cluster to make sure it is ready for Istio installation...
 
@@ -142,7 +142,7 @@ nginx   2/2     Running   0          22s
 
 - We can verify that the workload certificate was issued from the Venafi chain of trust by inspecting the secrets injected into the sidecar using `istioclt`:
 ```bash
-$ getistio istioctl proxy-config secret nginx.default -o json | \
+$ getmesh istioctl proxy-config secret nginx.default -o json | \
    jq '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
    tr -d '"' | base64 -d | openssl x509 -text -noout
        
@@ -207,7 +207,7 @@ Certificate:
          5a:4e:e2:d4:ce:cc:6f:0f:fb:06:bd:10:bc:ff:c1:16:cb:5b:
          9c:52:76:52
 
-$ getistio istioctl proxy-config secret nginx.default -o json | \
+$ getmesh istioctl proxy-config secret nginx.default -o json | \
     jq '.dynamicActiveSecrets[2].secret.validationContext.trustedCa.inlineBytes' | \
     tr -d '"' | base64 -d | openssl x509 -text -noout
 Certificate:

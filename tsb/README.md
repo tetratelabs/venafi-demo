@@ -58,8 +58,13 @@ $ kubectl apply -f tsb/istio-root.yaml
 - Install the [istio-csr](https://github.com/cert-manager/istio-csr), which allows cert-manager to issue workload certificates for Istio.  `certificate.preserveCertificateRequests` is helpful to debug if the certificate issuing is not working as expected later. If you are not using the default clusterId edit the `agent.clusterId` parameter accordingly. 
 ```bash
 $ helm install -n cert-manager cert-manager-istio-csr jetstack/cert-manager-istio-csr \
-  --set certificate.preserveCertificateRequests=true --set agent.clusterID=venafi-test
+  --set certificate.preserveCertificateRequests=true --set app.server.clusterID=venafi-test
 ```
+---
+**NOTE**
+
+The `app.server.clusterID` has been updated from `agent.clusterID` this flag is a notable change in `cert-manager-istio-csr` v0.2.0
+Major change in the flag for deploying to TSB control-plane cluster (changed from `agent` to `app.server`) causes the cert-manager-istio-csr to be unable to communicate with the kube-api-client which in turn causes the side-car to throw authentication errors
 
 - Lastly, verify that the root istiod certificate has been signed and is in `Ready` state:
 ```bash
@@ -123,7 +128,19 @@ kind: ControlPlane
 ```bash
 $ kubectl apply -f tsb/control-plane.yaml  
 ```
+---
+**NOTE**
 
+For existing TSB `controlplane`, when updating the control plane with the istio overlay `kubectl edit controlplane -n istio-system controlplane`, sidecars give the error below
+
+```bash
+Error creating: Internal error occurred: failed calling webhook "sidecar-injector.istio.io": Post "https://istiod.istio-system.svc:443/inject?timeout=30s": x509: certificate signed by unknown authority
+```
+Restart the istiod pod to fix this issue
+```bash
+kubectl -n istio-system patch deployment istiod \
+    -p "{\"spec\":{\"template\":{\"metadata\":{\"labels\":{\"date\":\"`date +'%s'`\"}}}}}"
+```
 ## Verifying the Integration
 - Label a kubernetes namespace with `istio-injection=enabled`
 ```bash
@@ -142,7 +159,7 @@ nginx   2/2     Running   0          22s
 
 - We can verify that the workload certificate was issued from the Venafi chain of trust by inspecting the secrets injected into the sidecar using `istioclt`:
 ```bash
-$ getistio istioctl proxy-config secret nginx.default -o json | \
+$ getmesh istioctl proxy-config secret nginx.default -o json | \
    jq '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
    tr -d '"' | base64 -d | openssl x509 -text -noout
        
@@ -206,7 +223,7 @@ Certificate:
          4d:ce:24:58:61:08:86:65:0d:f9:7d:25:ca:1c:09:38:60:7c:
          5a:4e:e2:d4:ce:cc:6f:0f:fb:06:bd:10:bc:ff:c1:16:cb:5b:
          9c:52:76:52
-getistio istioctl proxy-config secret nginx.default -o json | \
+getmesh istioctl proxy-config secret nginx.default -o json | \
     jq '.dynamicActiveSecrets[2].secret.validationContext.trustedCa.inlineBytes' | \
     tr -d '"' | base64 -d | openssl x509 -text -noout
 Certificate:
