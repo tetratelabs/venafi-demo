@@ -39,13 +39,29 @@ The solution implements a three-tier certificate hierarchy:
 
 ```mermaid
 graph TD
-    A[Root CA - 10 years] -->|Signs| B[Istio Intermediate CA - 60 days]
-    B -->|Signs| C[Workload Certificates - 24 hours]
+    subgraph "🏛️ Certificate Authority Hierarchy"
+        A["🔐 Root CA<br/>📅 10 years<br/>🔑 Self-Signed<br/>🔒 Long-term trust anchor"]
+        B["🔑 Istio Intermediate CA<br/>📅 60 days<br/>🔄 Auto-rotated<br/>🎯 Issues workload certs"]
+        C["📋 Workload Certificates<br/>📅 24 hours<br/>🔄 Auto-rotated<br/>🌐 Service-to-service mTLS"]
+    end
     
-    D[cert-manager] -->|Manages| A
-    D -->|Auto-rotates| B
-    E[Istio Citadel] -->|Uses| B
-    E -->|Issues| C
+    subgraph "🤖 Management Components"
+        D["🛠️ cert-manager<br/>Kubernetes certificate controller"]
+        E["🎯 Istio Citadel<br/>Built-in CA for workload certs"]
+    end
+    
+    A -->|"🖊️ Signs"| B
+    B -->|"🖊️ Signs"| C
+    D -->|"📊 Manages & monitors"| A
+    D -->|"🔄 Auto-rotates every 45 days"| B
+    E -->|"📥 Uses as signing CA"| B
+    E -->|"📤 Issues to workloads"| C
+    
+    style A fill:#ffe6e6,stroke:#d32f2f,stroke-width:3px
+    style B fill:#e3f2fd,stroke:#1976d2,stroke-width:3px
+    style C fill:#e8f5e8,stroke:#388e3c,stroke-width:3px
+    style D fill:#fff8e1,stroke:#f57c00,stroke-width:2px
+    style E fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
 ```
 
 ### Component Overview
@@ -78,9 +94,59 @@ sequenceDiagram
 
 ### Detailed Architecture
 
-![CA Rotation Architecture](images/ca-rotation-architecture.png)
+```mermaid
+graph TB
+    subgraph "Certificate Hierarchy"
+        RootCA["🔐 Root CA<br/>(10 years)<br/>Self-Signed"]
+        IstioCA["🔑 Istio Intermediate CA<br/>(60 days)<br/>Auto-Rotated"]
+        WorkloadCert["📋 Workload Certificates<br/>(24 hours)<br/>Auto-Rotated"]
+    end
 
-*Note: If the diagram is not visible, see [images/ca-rotation-architecture.mermaid](images/ca-rotation-architecture.mermaid) for the source.*
+    subgraph "cert-manager Components"
+        CM["🤖 cert-manager<br/>Controller"]
+        CMWebhook["📡 cert-manager<br/>Webhook"]
+        SelfSignedIssuer["✍️ Self-Signed<br/>ClusterIssuer"]
+        RootCAIssuer["🏛️ Root CA<br/>ClusterIssuer"]
+    end
+
+    subgraph "Istio Components"
+        Istiod["🎯 istiod<br/>(Control Plane)"]
+        Citadel["🏰 Citadel<br/>(Certificate Authority)"]
+        Proxy1["🔄 Envoy Proxy<br/>(Sidecar 1)"]
+        Proxy2["🔄 Envoy Proxy<br/>(Sidecar 2)"]
+    end
+
+    subgraph "Kubernetes Resources"
+        RootSecret["📦 Secret:<br/>root-ca-secret"]
+        IstioSecret["📦 Secret:<br/>cacerts"]
+        CertResource["📜 Certificate:<br/>istio-ca"]
+    end
+
+    %% Certificate Flow
+    SelfSignedIssuer -->|Creates| RootCA
+    RootCA -->|Stored in| RootSecret
+    RootCAIssuer -->|Uses| RootSecret
+    RootCAIssuer -->|Issues| IstioCA
+    CM -->|Manages| CertResource
+    CertResource -->|Generates| IstioSecret
+    IstioSecret -->|Mounted by| Istiod
+    Istiod -->|Contains| Citadel
+    Citadel -->|Issues| WorkloadCert
+    WorkloadCert -->|Used by| Proxy1
+    WorkloadCert -->|Used by| Proxy2
+
+    %% Rotation Flow
+    CM -->|Monitors expiry<br/>Every 1m| CertResource
+    CM -->|Renews 15 days<br/>before expiry| IstioCA
+    Istiod -->|AUTO_RELOAD_PLUGIN_CERTS=true<br/>Detects new cert| IstioSecret
+    Citadel -->|Uses new CA<br/>Issues new certs| WorkloadCert
+
+    style RootCA fill:#ffe6e6,stroke:#ff4444,stroke-width:2px
+    style IstioCA fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style WorkloadCert fill:#e6ffe6,stroke:#00cc00,stroke-width:2px
+    style CM fill:#fff9e6,stroke:#ffaa00,stroke-width:2px
+    style Istiod fill:#f0e6ff,stroke:#8800cc,stroke-width:2px
+```
 
 The architecture consists of:
 
@@ -286,24 +352,48 @@ istioctl version
 The automated CA rotation process involves several components working together:
 
 ```mermaid
-graph LR
-    subgraph "cert-manager"
-        A[Certificate Controller] --> B[Renewal Check]
-        B --> C{15 days before<br/>expiry?}
-        C -->|Yes| D[Generate New Cert]
-        C -->|No| B
+graph TD
+    subgraph "📅 cert-manager Rotation Process"
+        A["🔍 Certificate Controller<br/>Monitors expiry every 1m"] 
+        B["📊 Renewal Check<br/>Current time vs renewBefore"]
+        C{"⏰ 15 days before<br/>expiry reached?"}
+        D["🔧 Generate New Certificate<br/>Using Root CA"]
+        A --> B
+        B --> C
+        C -->|❌ No| B
+        C -->|✅ Yes| D
     end
     
-    subgraph "Kubernetes"
-        D --> E[Update Secret<br/>cacerts]
-        E --> F[Trigger Event]
+    subgraph "☸️ Kubernetes Secret Management"
+        E["📦 Update Secret<br/>cacerts in istio-system"]
+        F["📡 Kubernetes Event<br/>Secret.Update"]
+        D --> E
+        E --> F
     end
     
-    subgraph "Istio"
-        F --> G[istiod detects<br/>secret change]
-        G --> H[Reload CA cert]
-        H --> I[Issue new<br/>workload certs]
+    subgraph "🎯 Istio Certificate Reload"
+        G["👁️ istiod detects<br/>secret change"]
+        H["🔄 Reload CA Certificate<br/>AUTO_RELOAD_PLUGIN_CERTS"]
+        I["🏰 Citadel updates<br/>internal CA store"]
+        J["📜 Issue new workload certs<br/>with updated CA chain"]
+        F --> G
+        G --> H
+        H --> I
+        I --> J
     end
+    
+    subgraph "🔄 Envoy Proxy Updates"
+        K["📨 Proxies request<br/>certificate refresh"]
+        L["✅ Zero-downtime<br/>certificate update"]
+        J --> K
+        K --> L
+    end
+
+    style A fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    style C fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style D fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    style H fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style L fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
 ```
 
 ### Certificate Lifecycle

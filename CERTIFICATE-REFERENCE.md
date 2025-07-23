@@ -3,22 +3,31 @@
 ## Certificate Hierarchy and Timing
 
 ```mermaid
-gantt
-    title Certificate Lifecycle Timeline
-    dateFormat  X
-    axisFormat %d days
+graph LR
+    subgraph "📊 Certificate Validity Periods"
+        A["🔐 Root CA<br/>📅 10 Years<br/>🔄 Renews at 9.9 years<br/>📍 Rarely rotates"]
+        B["🔑 Istio CA<br/>📅 60 Days<br/>🔄 Renews at 45 days<br/>📍 Auto-rotation"]
+        C["📋 Workload Certs<br/>📅 24 Hours<br/>🔄 Renews at 16 hours<br/>📍 Frequent rotation"]
+    end
     
-    section Root CA
-    10 Year Validity           :0, 3650
-    Renewal Window (30d)       :3620, 30
+    subgraph "⏰ Renewal Timeline"
+        D["Day 0<br/>🟢 Fresh Certificates"]
+        E["Day 45<br/>🟡 Istio CA Renewal"]
+        F["Day 60<br/>🔴 Without rotation:<br/>Istio CA expires"]
+        G["Every 16h<br/>🔄 Workload rotation"]
+    end
     
-    section Istio CA  
-    60 Day Validity            :0, 60
-    Renewal Window (15d)       :45, 15
+    A -.->|"Signs"| B
+    B -.->|"Signs"| C
+    D --> E
+    E --> F
     
-    section Workload
-    24 Hour Validity           :0, 1
-    Renewal (8h)               :0.67, 0.33
+    style A fill:#ffe6e6,stroke:#d32f2f,stroke-width:2px
+    style B fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style C fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    style E fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style F fill:#ffebee,stroke:#c62828,stroke-width:2px
+    style G fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
 ```
 
 ## Key Configuration Parameters
