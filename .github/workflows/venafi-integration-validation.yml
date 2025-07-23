@@ -18,10 +18,10 @@ on:
   workflow_dispatch:
 
 env:
-  KIND_VERSION: v0.20.0
-  KUBERNETES_VERSION: v1.29.0
+  KIND_VERSION: v0.29.0
+  KUBERNETES_VERSION: v1.32.5
   HELM_VERSION: v3.14.0
-  ISTIO_VERSION: 1.21.0
+  ISTIO_VERSION: 1.25.2
   VENAFI_DEMO_MODE: "true"
 
 jobs:
@@ -177,29 +177,20 @@ jobs:
         apiVersion: install.istio.io/v1alpha1
         kind: IstioOperator
         metadata:
-          name: venafi-istio
           namespace: istio-system
         spec:
+          profile: cert-manager-istio-csr 
           values:
-            pilot:
-              env:
-                EXTERNAL_CA: true
-                PILOT_CERT_PROVIDER: k8s.cluster.local
-                ENABLE_CA_SERVER: false
             global:
-              meshID: mesh1
-              network: network1
-              trustDomain: cluster.local
+              # The address of the Istio CSR gRPC server
+              caAddress: cert-manager-istio-csr.istio-system.svc:443
           components:
             pilot:
               k8s:
                 env:
-                  - name: CERT_SIGNER_DOMAIN
-                    value: venafi-cloud-issuer.cert-manager.io
-                  - name: PILOT_CERT_PROVIDER
-                    value: k8s.cluster.local
-                  - name: EXTERNAL_CA
-                    value: "true"
+                  # Disable istiod CA Sever functionality
+                - name: ENABLE_CA_SERVER
+                  value: "false"
         EOF
         
         # Install Istio with Venafi integration
