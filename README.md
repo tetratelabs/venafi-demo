@@ -305,21 +305,7 @@ helm install istiod tetratelabs/istiod \
   --version ${VERSION}
 ```
 
-### Step 5: Install Istio Gateway
-
-```bash
-# Create ingress namespace
-kubectl create namespace istio-ingress
-
-# Install gateway
-helm install istio-ingress tetratelabs/gateway \
-  -n istio-ingress \
-  --set global.tag=${TAG} \
-  --set global.hub="containers.istio.tetratelabs.com" \
-  --version ${VERSION}
-```
-
-### Step 6: Verify Installation
+### Step 5: Verify Installation
 
 ```bash
 # Check Helm releases
@@ -327,7 +313,6 @@ helm ls -A
 
 # Verify pods are running
 kubectl get pods -n istio-system
-kubectl get pods -n istio-ingress
 
 # Check Istio version
 istioctl version
