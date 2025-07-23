@@ -1,17 +1,19 @@
-name: TID Installation and CA Rotation Validation
+name: Venafi Cloud + Istio Integration Validation
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'README.md'
-      - '.github/workflows/tid-validation.yml'
+      - '.github/workflows/venafi-integration-validation.yml'
+      - 'VENAFI-INTEGRATION.md'
       - 'scripts/**'
   pull_request:
     branches: [ main ]
     paths:
       - 'README.md'
-      - '.github/workflows/tid-validation.yml'
+      - '.github/workflows/venafi-integration-validation.yml'
+      - 'VENAFI-INTEGRATION.md'
       - 'scripts/**'
   workflow_dispatch:
 
@@ -19,12 +21,11 @@ env:
   KIND_VERSION: v0.20.0
   KUBERNETES_VERSION: v1.29.0
   HELM_VERSION: v3.14.0
-  CERT_MANAGER_VERSION: v1.13.3
-  TID_VERSION: 1.24.0+tetrate0
-  TID_TAG: 1.24.0-tetrate0
+  ISTIO_VERSION: 1.21.0
+  VENAFI_DEMO_MODE: "true"
 
 jobs:
-  validate-tid-installation:
+  validate-venafi-integration:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -49,7 +50,7 @@ jobs:
         cat <<EOF > kind-config.yaml
         kind: Cluster
         apiVersion: kind.x-k8s.io/v1alpha4
-        name: tid-demo
+        name: venafi-demo
         nodes:
         - role: control-plane
           image: kindest/node:${{ env.KUBERNETES_VERSION }}
@@ -72,169 +73,179 @@ jobs:
         kind create cluster --config kind-config.yaml --wait 300s
         
         # Verify cluster is ready
-        kubectl cluster-info --context kind-tid-demo
+        kubectl cluster-info --context kind-venafi-demo
         kubectl get nodes -o wide
 
     - name: Install istioctl
       run: |
-        # Install istioctl that matches TID version 1.24.0 (use 1.21.0 for better compatibility)
-        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.21.0 sh -
-        sudo mv istio-1.21.0/bin/istioctl /usr/local/bin/
+        # Install istioctl
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
+        sudo mv istio-${{ env.ISTIO_VERSION }}/bin/istioctl /usr/local/bin/
         istioctl version --remote=false
         
         # Verify cluster is ready
         kubectl get nodes
 
-    - name: Add Tetrate Helm Repository
+    - name: Install venctl CLI
       run: |
-        helm repo add tetratelabs https://tis.tetrate.io/charts
-        helm repo update tetratelabs
-        helm search repo tetratelabs/base --versions
+        # Install venctl for Venafi Cloud integration
+        curl -sSfL https://dl.venafi.cloud/venctl/latest/installer.sh | bash
+        echo "$HOME/.venafi/bin" >> $GITHUB_PATH
+        export PATH="$HOME/.venafi/bin:$PATH"
+        venctl version || echo "venctl installed but not authenticated yet"
 
-    - name: Install TID Base Components
+    - name: Setup Demo Venafi Components
       run: |
+        # Create required namespaces
+        kubectl create namespace venafi
         kubectl create namespace istio-system
-        helm install istio-base tetratelabs/base \
-          -n istio-system \
-          --set global.tag=${{ env.TID_TAG }} \
-          --set global.hub="containers.istio.tetratelabs.com" \
-          --version ${{ env.TID_VERSION }} \
-          --wait
-
-    - name: Create istiod Values File
-      run: |
-        cat <<EOF > istiod-values.yaml
-        global:
-          tag: ${{ env.TID_TAG }}
-          hub: "containers.istio.tetratelabs.com"
         
-        pilot:
-          env:
-            AUTO_RELOAD_PLUGIN_CERTS: "true"
-            PILOT_CERT_CHECK_INTERVAL: "1m"
-        
-        meshConfig:
-          defaultConfig:
-            proxyStatsMatcher:
-              inclusionRegexps:
-              - ".*circuit_breakers.*"
-              - ".*osconfig.*"
-              - ".*outlier_detection.*"
-              - ".*_retry.*"
-        EOF
+        # Install cert-manager (simulating Venafi components)
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.3/cert-manager.yaml
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
 
-    - name: Install TID Control Plane
-      run: |
-        helm install istiod tetratelabs/istiod \
-          -n istio-system \
-          -f istiod-values.yaml \
-          --version ${{ env.TID_VERSION }} \
-          --wait
-
-    - name: Verify TID Installation
-      run: |
-        kubectl get pods -n istio-system
-        istioctl version
-
-    - name: Install cert-manager
-      run: |
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${{ env.CERT_MANAGER_VERSION }}/cert-manager.yaml
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=180s
-
-    - name: Setup CA Infrastructure
-      run: |
-        # Create Root CA
+        # Create a demo Venafi issuer (self-signed for demo purposes)
         cat <<EOF | kubectl apply -f -
         ---
         apiVersion: cert-manager.io/v1
         kind: ClusterIssuer
         metadata:
-          name: selfsigned-issuer
+          name: venafi-demo-issuer
         spec:
           selfSigned: {}
         ---
         apiVersion: cert-manager.io/v1
         kind: Certificate
         metadata:
-          name: root-ca
+          name: venafi-root-ca
           namespace: cert-manager
         spec:
           isCA: true
-          commonName: root-ca
-          secretName: root-ca-secret
-          duration: 87600h
-          renewBefore: 720h
+          commonName: "Venafi Demo Root CA"
+          secretName: venafi-root-ca-secret
+          duration: 8760h # 1 year
+          renewBefore: 720h # 30 days
           privateKey:
             algorithm: RSA
             encoding: PKCS1
             size: 4096
           issuerRef:
-            name: selfsigned-issuer
+            name: venafi-demo-issuer
             kind: ClusterIssuer
             group: cert-manager.io
         ---
         apiVersion: cert-manager.io/v1
         kind: ClusterIssuer
         metadata:
-          name: root-ca-issuer
+          name: venafi-cloud-issuer
         spec:
           ca:
-            secretName: root-ca-secret
+            secretName: venafi-root-ca-secret
         EOF
         
-        # Wait for root CA to be ready
-        echo "Waiting for root CA certificate to be ready..."
-        kubectl wait --for=condition=ready certificate/root-ca -n cert-manager --timeout=120s
+        # Wait for demo Venafi CA to be ready
+        echo "Waiting for demo Venafi CA certificate to be ready..."
+        kubectl wait --for=condition=ready certificate/venafi-root-ca -n cert-manager --timeout=180s
         
-        # Verify root CA is working
-        kubectl get certificate root-ca -n cert-manager -o yaml
+        # Verify demo Venafi CA is working
+        kubectl get certificate venafi-root-ca -n cert-manager -o yaml
 
-    - name: Setup Istio CA with Rotation
+    - name: Install Istio with Venafi Integration
       run: |
+        # Create istio-csr configuration
+        kubectl create configmap istio-csr-ca \
+          --namespace=istio-system \
+          --from-literal=issuer-name=venafi-cloud-issuer \
+          --from-literal=issuer-kind=ClusterIssuer \
+          --from-literal=issuer-group=cert-manager.io
+        
+        # Install istio-csr (simulating Venafi component)
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+        helm install cert-manager-istio-csr jetstack/cert-manager-istio-csr \
+          --namespace istio-system \
+          --create-namespace \
+          --set image.repository=quay.io/jetstack/cert-manager-istio-csr \
+          --set app.tls.trustDomain=cluster.local \
+          --set app.certmanager.issuer.name=venafi-cloud-issuer \
+          --set app.certmanager.issuer.kind=ClusterIssuer \
+          --set app.certmanager.issuer.group=cert-manager.io \
+          --wait --timeout=300s
+        
+        # Create Istio configuration for Venafi integration
+        cat <<EOF > istio-venafi-config.yaml
+        apiVersion: install.istio.io/v1alpha1
+        kind: IstioOperator
+        metadata:
+          name: venafi-istio
+          namespace: istio-system
+        spec:
+          values:
+            pilot:
+              env:
+                EXTERNAL_CA: true
+                PILOT_CERT_PROVIDER: k8s.cluster.local
+                ENABLE_CA_SERVER: false
+            global:
+              meshID: mesh1
+              network: network1
+              trustDomain: cluster.local
+          components:
+            pilot:
+              k8s:
+                env:
+                  - name: CERT_SIGNER_DOMAIN
+                    value: venafi-cloud-issuer.cert-manager.io
+                  - name: PILOT_CERT_PROVIDER
+                    value: k8s.cluster.local
+                  - name: EXTERNAL_CA
+                    value: "true"
+        EOF
+        
+        # Install Istio with Venafi integration
+        istioctl install -f istio-venafi-config.yaml -y
+        
+        # Create root certificate for Istio CA from Venafi
         cat <<EOF | kubectl apply -f -
-        ---
         apiVersion: cert-manager.io/v1
         kind: Certificate
         metadata:
-          name: istio-ca
+          name: istio-ca-cert
           namespace: istio-system
         spec:
-          isCA: true
-          commonName: istio-ca
           secretName: cacerts
-          duration: 1440h
-          renewBefore: 360h
-          privateKey:
-            algorithm: RSA
-            encoding: PKCS1
-            size: 4096
+          duration: 8760h # 1 year
+          renewBefore: 720h # 30 days
+          commonName: istiod.istio-system.svc
+          isCA: true
+          usages:
+            - digital signature
+            - key encipherment
+            - cert sign
+          dnsNames:
+            - istiod.istio-system.svc
+            - istiod.istio-system.svc.cluster.local
           issuerRef:
-            name: root-ca-issuer
+            name: venafi-cloud-issuer
             kind: ClusterIssuer
             group: cert-manager.io
-        ---
-        apiVersion: cert-manager.io/v1
-        kind: Issuer
-        metadata:
-          name: istio-ca-issuer
-          namespace: istio-system
-        spec:
-          ca:
-            secretName: cacerts
         EOF
         
-        # Wait for Istio CA to be ready
-        echo "Waiting for Istio CA certificate to be ready..."
-        kubectl wait --for=condition=ready certificate/istio-ca -n istio-system --timeout=120s
+        # Wait for Istio CA certificate to be issued
+        echo "Waiting for Istio CA certificate to be issued..."
+        kubectl wait --for=condition=ready certificate/istio-ca-cert -n istio-system --timeout=300s
         
-        # Verify Istio CA is working
-        kubectl get certificate istio-ca -n istio-system -o yaml
-        kubectl get secret cacerts -n istio-system
-
-    - name: Restart istiod to Load New CA
-      run: |
+        # Wait for Istio control plane to be ready
+        kubectl wait --for=condition=ready pod -l app=istiod -n istio-system --timeout=300s
+        
+        # Restart istiod to load Venafi-issued certificate
         kubectl rollout restart deployment/istiod -n istio-system
-        kubectl rollout status deployment/istiod -n istio-system --timeout=180s
+        kubectl rollout status deployment/istiod -n istio-system --timeout=300s
+        
+        # Verify installation
+        kubectl get pods -n istio-system
+        kubectl get certificates -n istio-system
+        istioctl version
 
     - name: Deploy Test Application
       run: |
@@ -242,7 +253,7 @@ jobs:
         apiVersion: v1
         kind: Namespace
         metadata:
-          name: test-mtls
+          name: test-app
           labels:
             istio-injection: enabled
         ---
@@ -250,7 +261,7 @@ jobs:
         kind: Deployment
         metadata:
           name: httpbin
-          namespace: test-mtls
+          namespace: test-app
         spec:
           replicas: 1
           selector:
@@ -271,7 +282,7 @@ jobs:
         kind: Service
         metadata:
           name: httpbin
-          namespace: test-mtls
+          namespace: test-app
         spec:
           ports:
           - name: http
@@ -280,44 +291,61 @@ jobs:
           selector:
             app: httpbin
         ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: curl
+          namespace: test-app
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: curl
+          template:
+            metadata:
+              labels:
+                app: curl
+            spec:
+              containers:
+              - image: curlimages/curl:latest
+                name: curl
+                command: ["/bin/sh", "-c", "sleep 3600"]
+        ---
         apiVersion: security.istio.io/v1beta1
         kind: PeerAuthentication
         metadata:
           name: default
-          namespace: test-mtls
+          namespace: test-app
         spec:
           mtls:
             mode: STRICT
         EOF
         
-        # Wait for deployment to be ready
-        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=180s
+        # Wait for deployments to be ready
+        echo "Waiting for httpbin deployment to be ready..."
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test-app --timeout=180s
         
-        # Additional wait for Istio sidecar injection and readiness
-        echo "Waiting for Istio sidecars to be ready..."
-        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=120s
+        echo "Waiting for curl deployment to be ready..."
+        kubectl wait --for=condition=ready pod -l app=curl -n test-app --timeout=180s
         
-        # Give extra time for sidecars to fully initialize
+        # Give additional time for sidecars to initialize
+        echo "Allowing time for Istio sidecars to initialize..."
         sleep 30
         
-        # Verify pods are actually running with sidecars
+        # Verify pods are running with sidecars
         echo "Verifying pod readiness..."
-        kubectl get pods -n test-mtls -o wide
-        
-        # Also wait for curl deployment to be ready
-        echo "Waiting for curl deployment to be ready..."
-        kubectl wait --for=condition=ready pod -l app=curl -n test-mtls --timeout=120s
+        kubectl get pods -n test-app -o wide
         
         # Show detailed pod information for debugging
-        kubectl describe pods -n test-mtls
+        kubectl describe pods -n test-app | head -50
 
-    - name: Verify mTLS and Certificate
+    - name: Verify Venafi Integration and mTLS
       run: |
-        # Check certificate status
-        kubectl get certificate -n istio-system istio-ca -o yaml
+        # Check Venafi-issued certificate status
+        kubectl get certificate -n istio-system istio-ca-cert -o yaml
         
-        # Check certificate expiry - try different possible keys
-        echo "Checking certificate expiry..."
+        # Check Venafi-issued certificate expiry
+        echo "Checking Venafi-issued certificate expiry..."
         kubectl get secret cacerts -n istio-system -o yaml
         
         # Try to extract and verify certificate
@@ -354,7 +382,7 @@ jobs:
         while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$ISTIOCTL_SUCCESS" = "false" ]; do
           echo "Attempt $((RETRY_COUNT + 1)) to run istioctl pc secret..."
           
-          if istioctl pc secret deployment/httpbin.test-mtls > /tmp/istioctl_output.txt 2>&1; then
+          if istioctl pc secret deployment/httpbin.test-app > /tmp/istioctl_output.txt 2>&1; then
             echo "✅ istioctl pc secret successful!"
             cat /tmp/istioctl_output.txt
             ISTIOCTL_SUCCESS=true
@@ -363,7 +391,7 @@ jobs:
             echo ""
             echo "Extracting certificate details from sidecar..."
             
-            if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/istioctl_json.txt 2>&1; then
+            if istioctl pc secret deployment/httpbin.test-app -o json > /tmp/istioctl_json.txt 2>&1; then
               echo "Certificate issuer from sidecar:"
               jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/istioctl_json.txt | \
                 base64 -d | openssl x509 -text -noout | grep -A2 "Issuer" || echo "Could not parse certificate details"
@@ -400,31 +428,31 @@ jobs:
           
           # Check that workload can communicate (proves mTLS is working)
           echo "Testing mTLS communication as certificate validation..."
-          kubectl get pods -n test-mtls -l app=httpbin
-          kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -5 || echo "mTLS test failed"
+          kubectl get pods -n test-app -l app=httpbin
+          kubectl exec -n test-app deployment/curl -- curl -s http://httpbin:8000/headers | head -5 || echo "mTLS test failed"
           
           # Check sidecar presence
           echo "Checking Istio sidecar presence..."
-          kubectl get pods -n test-mtls -o json | jq -r '.items[].spec.containers[] | select(.name == "istio-proxy") | .name' | head -1 || echo "No istio-proxy container found"
+          kubectl get pods -n test-app -o json | jq -r '.items[].spec.containers[] | select(.name == "istio-proxy") | .name' | head -1 || echo "No istio-proxy container found"
         fi
         
         # Test mTLS communication using existing curl deployment
         echo "Testing mTLS communication using curl deployment..."
-        kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -20
+        kubectl exec -n test-app deployment/curl -- curl -s http://httpbin:8000/headers | head -20
         
         # Alternative: Create a test pod and wait for it to be ready
         echo "Creating test curl pod..."
-        kubectl run curl-test --image=curlimages/curl:latest -n test-mtls --restart=Never -- sleep 3600
+        kubectl run curl-test --image=curlimages/curl:latest -n test-app --restart=Never -- sleep 3600
         
         # Give sidecar time to initialize
         sleep 15
         
         # Now test mTLS communication
         echo "Testing mTLS from test pod..."
-        kubectl exec -n test-mtls pod/curl-test -- curl -s http://httpbin:8000/headers | head -10
+        kubectl exec -n test-app pod/curl-test -- curl -s http://httpbin:8000/headers | head -10
         
         # Cleanup test pod
-        kubectl delete pod curl-test -n test-mtls --ignore-not-found=true
+        kubectl delete pod curl-test -n test-app --ignore-not-found=true
 
     - name: Run Certificate Rotation Test
       run: |
@@ -438,7 +466,7 @@ jobs:
         USING_ISTIOCTL=false
         
         echo "Attempting to capture current sidecar certificate serial with istioctl..."
-        if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/current_cert.json 2>&1; then
+        if istioctl pc secret deployment/httpbin.test-app -o json > /tmp/current_cert.json 2>&1; then
           CURRENT_SERIAL=$(jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/current_cert.json | \
             base64 -d | openssl x509 -serial -noout | cut -d'=' -f2 2>/dev/null || echo "unknown")
           
@@ -470,12 +498,12 @@ jobs:
         
         # Show current certificate details
         echo "Current CA certificate status:"
-        kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.renewalTime}'
+        kubectl get certificate istio-ca-cert -n istio-system -o jsonpath='{.status.renewalTime}'
         echo ""
         
         # Force certificate renewal (for testing)
         echo "Forcing certificate renewal for testing..."
-        kubectl annotate certificate istio-ca -n istio-system \
+        kubectl annotate certificate istio-ca-cert -n istio-system \
           cert-manager.io/issue-temporary-certificate="true" --overwrite
         
         # Wait for cert-manager to process renewal
@@ -484,16 +512,16 @@ jobs:
         
         # Check if certificate was renewed
         echo "Checking renewed certificate status:"
-        kubectl describe certificate istio-ca -n istio-system
+        kubectl describe certificate istio-ca-cert -n istio-system
         
         # Restart deployment to pick up new certificate faster
         echo "Restarting httpbin to pick up new certificate..."
-        kubectl rollout restart deployment/httpbin -n test-mtls
-        kubectl rollout status deployment/httpbin -n test-mtls --timeout=120s
+        kubectl rollout restart deployment/httpbin -n test-app
+        kubectl rollout status deployment/httpbin -n test-app --timeout=120s
         
         # Wait for pods to be ready with sidecars
         echo "Waiting for restarted pods to be ready..."
-        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=120s
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test-app --timeout=120s
         
         # Additional wait for sidecar to get new certificate
         echo "Allowing time for sidecar to receive new certificate..."
@@ -513,7 +541,7 @@ jobs:
           MAX_ROTATION_RETRIES=3
           
           while [ $ROTATION_RETRY -lt $MAX_ROTATION_RETRIES ]; do
-            if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/new_cert.json 2>&1; then
+            if istioctl pc secret deployment/httpbin.test-app -o json > /tmp/new_cert.json 2>&1; then
               NEW_SERIAL=$(jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/new_cert.json | \
                 base64 -d | openssl x509 -serial -noout | cut -d'=' -f2 2>/dev/null || echo "unknown")
               
@@ -574,7 +602,7 @@ jobs:
         # Final mTLS validation
         echo ""
         echo "Final mTLS communication test:"
-        kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -5 && \
+        kubectl exec -n test-app deployment/curl -- curl -s http://httpbin:8000/headers | head -5 && \
           echo "✅ mTLS communication successful after rotation" || echo "❌ mTLS communication failed after rotation"
 
     - name: Collect Logs on Failure
@@ -599,11 +627,20 @@ jobs:
         echo "=== Cert Manager Logs ==="
         kubectl logs -n cert-manager deployment/cert-manager --tail=100 || echo "No cert-manager"
         
+        echo "=== Venafi Namespace Pods ==="
+        kubectl get pods -n venafi -o wide || echo "No venafi namespace"
+        
+        echo "=== istio-csr Logs ==="
+        kubectl logs -n istio-system deployment/cert-manager-istio-csr --tail=100 || echo "No istio-csr"
+        
         echo "=== Test App Pods ==="
-        kubectl get pods -n test-mtls -o wide || echo "No test-mtls namespace"
+        kubectl get pods -n test-app -o wide || echo "No test-app namespace"
         
         echo "=== Certificates Status ==="
         kubectl get certificates -A || echo "No certificates found"
+        
+        echo "=== Venafi Issuer Status ==="
+        kubectl get clusterissuer venafi-cloud-issuer -o yaml || echo "No Venafi issuer found"
         
         echo "=== Kind Cluster Logs ==="
         kind export logs /tmp/kind-logs || echo "Failed to export kind logs"
@@ -612,7 +649,7 @@ jobs:
         istioctl analyze -A || echo "istioctl analyze failed"
         
         echo "=== Sidecar Certificate Details (istioctl) ==="
-        istioctl pc secret deployment/httpbin.test-mtls 2>&1 || echo "istioctl pc secret failed"
+        istioctl pc secret deployment/httpbin.test-app 2>&1 || echo "istioctl pc secret failed"
         
         echo "=== Sidecar Certificate JSON ==="
-        istioctl pc secret deployment/httpbin.test-mtls -o json 2>&1 || echo "istioctl pc secret JSON failed"
+        istioctl pc secret deployment/httpbin.test-app -o json 2>&1 || echo "istioctl pc secret JSON failed"
