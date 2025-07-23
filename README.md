@@ -499,6 +499,16 @@ kubectl logs -n istio-system deployment/istiod | grep -i "ca cert"
 
 ### Understanding the Configuration
 
+#### Certificate Secret Format
+
+cert-manager may store the Istio CA certificate in the `cacerts` secret using different key names depending on the configuration:
+
+- `ca-cert.pem` - Standard cert-manager CA certificate format
+- `tls.crt` - TLS certificate format (when using TLS secret type)
+- Other formats may exist based on specific configurations
+
+The commands above automatically detect and use the correct format.
+
 #### Key Environment Variables
 
 ```yaml
@@ -597,7 +607,7 @@ The repository includes three main automation scripts:
 ### 1. install-tid.sh
 - Installs Tetrate Istio Distribution
 - Configures automatic certificate reload
-- Sets up control plane and gateway
+- Sets up control plane with CA auto-reload
 
 ### 2. setup-ca-rotation.sh
 - Installs cert-manager
@@ -640,12 +650,23 @@ kubectl get certificate -n istio-system istio-ca -o yaml
 # Monitor certificate renewal
 kubectl describe certificate istio-ca -n istio-system
 
-# Check certificate expiry
-kubectl get secret cacerts -n istio-system -o json | \
-  jq -r '.data."ca-cert.pem"' | \
-  base64 -d | \
-  openssl x509 -text -noout | \
-  grep -A2 "Validity"
+# Check certificate expiry (try different possible keys)
+if kubectl get secret cacerts -n istio-system -o json | jq -r '.data."ca-cert.pem"' | base64 -d | openssl x509 -text -noout > /dev/null 2>&1; then
+  kubectl get secret cacerts -n istio-system -o json | \
+    jq -r '.data."ca-cert.pem"' | \
+    base64 -d | \
+    openssl x509 -text -noout | \
+    grep -A2 "Validity"
+elif kubectl get secret cacerts -n istio-system -o json | jq -r '.data."tls.crt"' | base64 -d | openssl x509 -text -noout > /dev/null 2>&1; then
+  kubectl get secret cacerts -n istio-system -o json | \
+    jq -r '.data."tls.crt"' | \
+    base64 -d | \
+    openssl x509 -text -noout | \
+    grep -A2 "Validity"
+else
+  echo "Certificate format not recognized. Available keys:"
+  kubectl get secret cacerts -n istio-system -o json | jq -r '.data | keys[]'
+fi
 ```
 
 ### Test mTLS Communication
@@ -677,10 +698,55 @@ kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.renewalTi
 # Check if mTLS is enabled
 istioctl authn tls-check deployment/httpbin -n test-mtls
 
-# View certificate chain
-istioctl proxy-config secret deployment/httpbin -n test-mtls -o json | \
-  jq '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' -r | \
+# View sidecar proxy certificate secrets
+istioctl proxy-config secret deployment/httpbin -n test-mtls
+
+# Extract and verify certificate chain
+istioctl pc secret deployment/httpbin.test-mtls -o json | \
+  jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
   base64 -d | openssl x509 -text -noout
+
+# Check certificate issuer (should show your Istio CA)
+istioctl pc secret deployment/httpbin.test-mtls -o json | \
+  jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+  base64 -d | openssl x509 -text -noout | grep -A2 "Issuer"
+
+# View certificate serial number (useful for tracking rotation)
+istioctl pc secret deployment/httpbin.test-mtls -o json | \
+  jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+  base64 -d | openssl x509 -serial -noout
+```
+
+### Validating Certificate Rotation
+
+```bash
+# Before rotation - capture current certificate serial
+BEFORE_SERIAL=$(istioctl pc secret deployment/httpbin.test-mtls -o json | \
+  jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+  base64 -d | openssl x509 -serial -noout | cut -d'=' -f2)
+echo "Certificate serial before rotation: $BEFORE_SERIAL"
+
+# Force certificate renewal (for testing)
+kubectl annotate certificate istio-ca -n istio-system \
+  cert-manager.io/issue-temporary-certificate="true" --overwrite
+
+# Wait for renewal and restart workload to pick up new certificate
+sleep 60
+kubectl rollout restart deployment/httpbin -n test-mtls
+kubectl rollout status deployment/httpbin -n test-mtls
+
+# After rotation - check new certificate serial
+AFTER_SERIAL=$(istioctl pc secret deployment/httpbin.test-mtls -o json | \
+  jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+  base64 -d | openssl x509 -serial -noout | cut -d'=' -f2)
+echo "Certificate serial after rotation: $AFTER_SERIAL"
+
+# Verify rotation occurred
+if [ "$BEFORE_SERIAL" != "$AFTER_SERIAL" ]; then
+  echo "✅ Certificate rotation successful!"
+else
+  echo "⚠️ Certificate rotation may not have completed"
+fi
 ```
 
 ## Troubleshooting
@@ -779,12 +845,10 @@ spec:
 kubectl delete namespace test-mtls
 
 # Remove Istio
-helm uninstall istio-ingress -n istio-ingress
 helm uninstall istiod -n istio-system
 helm uninstall istio-base -n istio-system
 
-# Remove namespaces
-kubectl delete namespace istio-ingress
+# Remove namespace
 kubectl delete namespace istio-system
 
 # Remove cert-manager (if desired)

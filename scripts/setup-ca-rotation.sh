@@ -164,11 +164,22 @@ kubectl get certificate istio-ca -n istio-system -o yaml | grep -E "renewalTime:
 
 echo ""
 echo "Certificate expiry information:"
-kubectl get secret cacerts -n istio-system -o json | \
-    jq -r '.data."ca-cert.pem"' | \
-    base64 -d | \
-    openssl x509 -text -noout | \
-    grep -A2 "Validity"
+if kubectl get secret cacerts -n istio-system -o json | jq -r '.data."ca-cert.pem"' | base64 -d | openssl x509 -text -noout > /dev/null 2>&1; then
+    kubectl get secret cacerts -n istio-system -o json | \
+        jq -r '.data."ca-cert.pem"' | \
+        base64 -d | \
+        openssl x509 -text -noout | \
+        grep -A2 "Validity"
+elif kubectl get secret cacerts -n istio-system -o json | jq -r '.data."tls.crt"' | base64 -d | openssl x509 -text -noout > /dev/null 2>&1; then
+    kubectl get secret cacerts -n istio-system -o json | \
+        jq -r '.data."tls.crt"' | \
+        base64 -d | \
+        openssl x509 -text -noout | \
+        grep -A2 "Validity"
+else
+    echo "Certificate format not recognized. Available keys:"
+    kubectl get secret cacerts -n istio-system -o json | jq -r '.data | keys[]'
+fi
 
 # Check if istiod picked up the new CA
 echo ""
