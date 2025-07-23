@@ -234,7 +234,12 @@ jobs:
         EOF
         
         # Wait for Istio CA to be ready
-        kubectl wait --for=condition=ready certificate/istio-ca -n istio-system --timeout=60s
+        echo "Waiting for Istio CA certificate to be ready..."
+        kubectl wait --for=condition=ready certificate/istio-ca -n istio-system --timeout=120s
+        
+        # Verify Istio CA is working
+        kubectl get certificate istio-ca -n istio-system -o yaml
+        kubectl get secret cacerts -n istio-system
 
     - name: Restart istiod to Load New CA
       run: |
@@ -341,20 +346,33 @@ jobs:
     - name: Collect Logs on Failure
       if: failure()
       run: |
+        echo "=== Cluster Status ==="
+        kubectl get nodes -o wide || echo "Failed to get nodes"
+        kubectl cluster-info || echo "Failed to get cluster info"
+        
+        echo "=== All Namespaces ==="
+        kubectl get namespaces || echo "Failed to get namespaces"
+        
+        echo "=== All Pods ==="
+        kubectl get pods -A || echo "Failed to get all pods"
+        
         echo "=== Istio System Pods ==="
-        kubectl get pods -n istio-system -o wide
+        kubectl get pods -n istio-system -o wide || echo "No istio-system namespace"
         
         echo "=== Istiod Logs ==="
-        kubectl logs -n istio-system deployment/istiod --tail=100
+        kubectl logs -n istio-system deployment/istiod --tail=100 || echo "No istiod deployment"
         
         echo "=== Cert Manager Logs ==="
-        kubectl logs -n cert-manager deployment/cert-manager --tail=100
+        kubectl logs -n cert-manager deployment/cert-manager --tail=100 || echo "No cert-manager"
         
         echo "=== Test App Pods ==="
-        kubectl get pods -n test-mtls -o wide
+        kubectl get pods -n test-mtls -o wide || echo "No test-mtls namespace"
         
         echo "=== Certificates Status ==="
-        kubectl get certificates -A
+        kubectl get certificates -A || echo "No certificates found"
+        
+        echo "=== Kind Cluster Logs ==="
+        kind export logs /tmp/kind-logs || echo "Failed to export kind logs"
         
         echo "=== Istio Configuration ==="
-        istioctl analyze -A
+        istioctl analyze -A || echo "istioctl analyze failed"
