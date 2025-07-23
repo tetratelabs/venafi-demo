@@ -71,8 +71,9 @@ jobs:
         # Create Kind cluster
         kind create cluster --config kind-config.yaml --wait 300s
         
-        # Verify cluster
+        # Verify cluster is ready
         kubectl cluster-info --context kind-tid-demo
+        kubectl get nodes -o wide
 
     - name: Install istioctl
       run: |
@@ -192,7 +193,11 @@ jobs:
         EOF
         
         # Wait for root CA to be ready
-        kubectl wait --for=condition=ready certificate/root-ca -n cert-manager --timeout=60s
+        echo "Waiting for root CA certificate to be ready..."
+        kubectl wait --for=condition=ready certificate/root-ca -n cert-manager --timeout=120s
+        
+        # Verify root CA is working
+        kubectl get certificate root-ca -n cert-manager -o yaml
 
     - name: Setup Istio CA with Rotation
       run: |
