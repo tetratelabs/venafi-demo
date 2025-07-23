@@ -130,8 +130,20 @@ kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers
 echo ""
 echo "Checking proxy certificates..."
 if command_exists istioctl; then
-    echo "Certificate chain for httpbin:"
-    istioctl proxy-config secret deployment/httpbin -n test-mtls | grep -E "ROOTCA|default" || echo "No certificates found yet"
+    echo "Sidecar certificate secrets for httpbin:"
+    istioctl proxy-config secret deployment/httpbin -n test-mtls
+    
+    echo ""
+    echo "Certificate issuer from sidecar:"
+    istioctl pc secret deployment/httpbin.test-mtls -o json | \
+      jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+      base64 -d | openssl x509 -text -noout | grep -A2 "Issuer" || echo "Certificate not ready yet"
+    
+    echo ""
+    echo "Certificate serial number:"
+    istioctl pc secret deployment/httpbin.test-mtls -o json | \
+      jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+      base64 -d | openssl x509 -serial -noout || echo "Certificate not ready yet"
 else
     echo "istioctl not found. Install it to view detailed proxy configuration."
 fi
