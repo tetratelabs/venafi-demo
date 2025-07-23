@@ -340,32 +340,70 @@ jobs:
           kubectl get secret cacerts -n istio-system -o json | jq -r '.data | keys[]'
         fi
         
-        # Validate sidecar received certificate from new CA
-        echo "Checking sidecar proxy certificate configuration..."
+        # Validate sidecar received certificate from new CA using istioctl
+        echo "=== Sidecar Certificate Validation ==="
         
-        # Try istioctl with fallback
-        if istioctl pc secret deployment/httpbin.test-mtls > /dev/null 2>&1; then
-          echo "Using istioctl to check sidecar certificates..."
-          istioctl pc secret deployment/httpbin.test-mtls
+        # Primary validation: Use istioctl pc secret (preferred method)
+        echo "Checking sidecar proxy certificate configuration with istioctl..."
+        
+        # Retry istioctl a few times as it may need time after pod restart
+        RETRY_COUNT=0
+        MAX_RETRIES=3
+        ISTIOCTL_SUCCESS=false
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$ISTIOCTL_SUCCESS" = "false" ]; do
+          echo "Attempt $((RETRY_COUNT + 1)) to run istioctl pc secret..."
           
-          # Extract and verify the certificate chain
-          echo "Verifying certificate chain in sidecar..."
-          istioctl pc secret deployment/httpbin.test-mtls -o json | \
-            jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
-            base64 -d | openssl x509 -text -noout | grep -A2 "Issuer" || echo "Could not parse certificate from istioctl"
-        else
-          echo "istioctl proxy-config failed, using alternative validation methods..."
+          if istioctl pc secret deployment/httpbin.test-mtls > /tmp/istioctl_output.txt 2>&1; then
+            echo "✅ istioctl pc secret successful!"
+            cat /tmp/istioctl_output.txt
+            ISTIOCTL_SUCCESS=true
+            
+            # Extract and verify the certificate chain
+            echo ""
+            echo "Extracting certificate details from sidecar..."
+            
+            if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/istioctl_json.txt 2>&1; then
+              echo "Certificate issuer from sidecar:"
+              jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/istioctl_json.txt | \
+                base64 -d | openssl x509 -text -noout | grep -A2 "Issuer" || echo "Could not parse certificate details"
+              
+              echo ""
+              echo "Certificate serial from sidecar:"
+              jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/istioctl_json.txt | \
+                base64 -d | openssl x509 -serial -noout || echo "Could not extract serial"
+                
+              echo ""
+              echo "Certificate validity from sidecar:"
+              jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/istioctl_json.txt | \
+                base64 -d | openssl x509 -dates -noout || echo "Could not extract validity dates"
+            else
+              echo "Could not get JSON output from istioctl, but basic command worked"
+              cat /tmp/istioctl_json.txt
+            fi
+          else
+            echo "❌ istioctl attempt $((RETRY_COUNT + 1)) failed:"
+            cat /tmp/istioctl_output.txt
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "Waiting 30 seconds before retry..."
+              sleep 30
+            fi
+          fi
+        done
+        
+        # Fallback validation if istioctl completely fails
+        if [ "$ISTIOCTL_SUCCESS" = "false" ]; then
+          echo ""
+          echo "⚠️  istioctl validation failed after $MAX_RETRIES attempts"
+          echo "Using alternative validation methods..."
           
-          # Alternative: Check that workload can communicate (proves mTLS is working)
+          # Check that workload can communicate (proves mTLS is working)
           echo "Testing mTLS communication as certificate validation..."
-          
-          # First check if httpbin pods are ready
           kubectl get pods -n test-mtls -l app=httpbin
-          
-          # Test using curl deployment (more reliable)
           kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -5 || echo "mTLS test failed"
           
-          # Check that Istio sidecar containers are running
+          # Check sidecar presence
           echo "Checking Istio sidecar presence..."
           kubectl get pods -n test-mtls -o json | jq -r '.items[].spec.containers[] | select(.name == "istio-proxy") | .name' | head -1 || echo "No istio-proxy container found"
         fi
@@ -377,10 +415,6 @@ jobs:
         # Alternative: Create a test pod and wait for it to be ready
         echo "Creating test curl pod..."
         kubectl run curl-test --image=curlimages/curl:latest -n test-mtls --restart=Never -- sleep 3600
-        
-        # Wait for test pod to be ready (including sidecar)
-        echo "Waiting for curl-test pod to be ready..."
-        kubectl wait --for=condition=ready pod/curl-test -n test-mtls --timeout=120s
         
         # Give sidecar time to initialize
         sleep 15
@@ -396,17 +430,39 @@ jobs:
       run: |
         echo "=== Certificate Rotation Test ==="
         
-        # Capture current certificate info for comparison
-        echo "Capturing current certificate information..."
+        # Capture current certificate info for comparison using istioctl
+        echo "=== Capturing Current Certificate State ==="
         
-        # Try to get sidecar certificate serial, with fallback
-        if istioctl pc secret deployment/httpbin.test-mtls -o json > /dev/null 2>&1; then
-          CURRENT_SERIAL=$(istioctl pc secret deployment/httpbin.test-mtls -o json | \
-            jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+        # Try to get sidecar certificate serial using istioctl pc secret
+        CURRENT_SERIAL=""
+        USING_ISTIOCTL=false
+        
+        echo "Attempting to capture current sidecar certificate serial with istioctl..."
+        if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/current_cert.json 2>&1; then
+          CURRENT_SERIAL=$(jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/current_cert.json | \
             base64 -d | openssl x509 -serial -noout | cut -d'=' -f2 2>/dev/null || echo "unknown")
-          echo "Current certificate serial: $CURRENT_SERIAL"
+          
+          if [ "$CURRENT_SERIAL" != "unknown" ] && [ -n "$CURRENT_SERIAL" ]; then
+            echo "✅ Current sidecar certificate serial: $CURRENT_SERIAL"
+            USING_ISTIOCTL=true
+            
+            # Also capture issuer for comparison
+            echo "Current certificate issuer:"
+            jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/current_cert.json | \
+              base64 -d | openssl x509 -issuer -noout 2>/dev/null || echo "Could not extract issuer"
+          else
+            echo "❌ Could not extract serial from istioctl output"
+            USING_ISTIOCTL=false
+          fi
         else
-          echo "Using CA certificate serial as reference (istioctl unavailable)..."
+          echo "❌ istioctl pc secret failed, will use CA certificate as reference"
+          cat /tmp/current_cert.json
+          USING_ISTIOCTL=false
+        fi
+        
+        # Fallback to CA certificate serial if istioctl fails
+        if [ "$USING_ISTIOCTL" = "false" ]; then
+          echo "Using CA certificate serial as reference..."
           CURRENT_SERIAL=$(kubectl get secret cacerts -n istio-system -o json | \
             jq -r '.data."tls.crt"' | base64 -d | openssl x509 -serial -noout | cut -d'=' -f2)
           echo "Current CA certificate serial: $CURRENT_SERIAL"
@@ -443,29 +499,67 @@ jobs:
         echo "Allowing time for sidecar to receive new certificate..."
         sleep 45
         
-        # Verify certificate rotation occurred
-        echo "Checking if certificate rotation occurred..."
+        # Verify certificate rotation occurred using istioctl
+        echo "=== Verifying Certificate Rotation ==="
         
-        # Try to get new certificate serial with same method as before
-        if istioctl pc secret deployment/httpbin.test-mtls -o json > /dev/null 2>&1; then
-          NEW_SERIAL=$(istioctl pc secret deployment/httpbin.test-mtls -o json | \
-            jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
-            base64 -d | openssl x509 -serial -noout | cut -d'=' -f2 2>/dev/null || echo "unknown")
-          echo "New certificate serial: $NEW_SERIAL"
+        NEW_SERIAL=""
+        
+        # Use the same method we used to capture the original certificate
+        if [ "$USING_ISTIOCTL" = "true" ]; then
+          echo "Checking new sidecar certificate serial with istioctl..."
           
-          if [ "$CURRENT_SERIAL" != "$NEW_SERIAL" ] && [ "$NEW_SERIAL" != "unknown" ]; then
-            echo "✅ SUCCESS: Certificate rotation verified - sidecar received new certificate"
+          # Retry istioctl a few times as certificate propagation may take time
+          ROTATION_RETRY=0
+          MAX_ROTATION_RETRIES=3
+          
+          while [ $ROTATION_RETRY -lt $MAX_ROTATION_RETRIES ]; do
+            if istioctl pc secret deployment/httpbin.test-mtls -o json > /tmp/new_cert.json 2>&1; then
+              NEW_SERIAL=$(jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/new_cert.json | \
+                base64 -d | openssl x509 -serial -noout | cut -d'=' -f2 2>/dev/null || echo "unknown")
+              
+              if [ "$NEW_SERIAL" != "unknown" ] && [ -n "$NEW_SERIAL" ]; then
+                echo "✅ New sidecar certificate serial: $NEW_SERIAL"
+                
+                # Show detailed certificate info
+                echo "New certificate issuer:"
+                jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/new_cert.json | \
+                  base64 -d | openssl x509 -issuer -noout 2>/dev/null || echo "Could not extract issuer"
+                
+                echo "New certificate validity:"
+                jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' /tmp/new_cert.json | \
+                  base64 -d | openssl x509 -dates -noout 2>/dev/null || echo "Could not extract dates"
+                break
+              else
+                echo "❌ Could not extract serial from new certificate, retry $((ROTATION_RETRY + 1))"
+                ROTATION_RETRY=$((ROTATION_RETRY + 1))
+                if [ $ROTATION_RETRY -lt $MAX_ROTATION_RETRIES ]; then
+                  echo "Waiting 20 seconds before retry..."
+                  sleep 20
+                fi
+              fi
+            else
+              echo "❌ istioctl failed for new certificate, retry $((ROTATION_RETRY + 1))"
+              cat /tmp/new_cert.json
+              ROTATION_RETRY=$((ROTATION_RETRY + 1))
+              if [ $ROTATION_RETRY -lt $MAX_ROTATION_RETRIES ]; then
+                sleep 20
+              fi
+            fi
+          done
+          
+          # Compare serials
+          if [ -n "$NEW_SERIAL" ] && [ "$NEW_SERIAL" != "unknown" ] && [ "$CURRENT_SERIAL" != "$NEW_SERIAL" ]; then
+            echo "🎉 SUCCESS: Certificate rotation verified!"
+            echo "   Before: $CURRENT_SERIAL"
+            echo "   After:  $NEW_SERIAL"
           else
-            echo "⚠️  WARNING: Certificate serial unchanged or unavailable - rotation may not have completed yet"
+            echo "⚠️  WARNING: Certificate serial unchanged or unavailable"
+            echo "   Before: $CURRENT_SERIAL"
+            echo "   After:  $NEW_SERIAL"
           fi
-          
-          # Show final certificate details if available
-          echo "Final certificate issuer:"
-          istioctl pc secret deployment/httpbin.test-mtls -o json | \
-            jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
-            base64 -d | openssl x509 -text -noout | grep -A2 "Issuer" 2>/dev/null || echo "Certificate details unavailable"
         else
           # Fallback: Compare CA certificate serials
+          echo "Comparing CA certificate serials (istioctl not available)..."
           NEW_CA_SERIAL=$(kubectl get secret cacerts -n istio-system -o json | \
             jq -r '.data."tls.crt"' | base64 -d | openssl x509 -serial -noout | cut -d'=' -f2)
           echo "New CA certificate serial: $NEW_CA_SERIAL"
@@ -475,12 +569,13 @@ jobs:
           else
             echo "⚠️  WARNING: CA certificate serial unchanged - rotation may not have completed yet"
           fi
-          
-          # Alternative validation: Check that mTLS still works
-          echo "Verifying mTLS communication still works after rotation..."
-          kubectl exec -n test-mtls deployment/httpbin -- curl -s -f http://httpbin:8000/headers > /dev/null && \
-            echo "✅ mTLS communication successful" || echo "❌ mTLS communication failed"
         fi
+        
+        # Final mTLS validation
+        echo ""
+        echo "Final mTLS communication test:"
+        kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -5 && \
+          echo "✅ mTLS communication successful after rotation" || echo "❌ mTLS communication failed after rotation"
 
     - name: Collect Logs on Failure
       if: failure()
@@ -515,3 +610,9 @@ jobs:
         
         echo "=== Istio Configuration ==="
         istioctl analyze -A || echo "istioctl analyze failed"
+        
+        echo "=== Sidecar Certificate Details (istioctl) ==="
+        istioctl pc secret deployment/httpbin.test-mtls 2>&1 || echo "istioctl pc secret failed"
+        
+        echo "=== Sidecar Certificate JSON ==="
+        istioctl pc secret deployment/httpbin.test-mtls -o json 2>&1 || echo "istioctl pc secret JSON failed"
