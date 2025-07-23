@@ -162,11 +162,14 @@ irm https://dl.venafi.cloud/venctl/latest/installer.ps1 | iex
 ### Step 2: Authenticate with Venafi Cloud
 
 ```bash
-# Configure venctl with your API key
-venctl auth --api-key "$VENAFI_CLOUD_API_KEY"
+export VENAFI_API_KEY="key"
 
-# Verify authentication
-venctl config show
+venctl iam service-accounts registry create --name "My Image Pull Secret" \
+  --scopes cert-manager-components,enterprise-venafi-issuer,enterprise-approver-policy,openshift-routes \
+  --output dockerconfig \
+  --output-file venafi_registry_docker_config.json \
+  --validity 365 \
+  --api-key $VENAFI_API_KEY
 ```
 
 ### Step 3: Create Kubernetes Namespaces
@@ -187,7 +190,7 @@ venctl components kubernetes manifest generate \
   --default-approver > venafi-components.yaml
 
 # Apply the manifest
-kubectl apply -f venafi-components.yaml
+ISTIO_TRUST_DOMAIN=cluster.local venctl components kubernetes manifest tool sync --file venafi-components.yaml
 ```
 
 ### Step 5: Configure Venafi Issuer
