@@ -237,34 +237,24 @@ cat <<EOF > istio-venafi-config.yaml
 apiVersion: install.istio.io/v1alpha1
 kind: IstioOperator
 metadata:
-  name: venafi-istio
+  namespace: istio-system
 spec:
+  profile: cert-manager-istio-csr 
+  hub: gcr.io/istio-release
+  meshConfig:
+    # Change the following line to configure the trust domain of the Istio cluster.
+    trustDomain: cluster.local 
   values:
-    istiodRemote:
-      enabled: false
-    pilot:
-      env:
-        EXTERNAL_CA: true
-        PILOT_CERT_PROVIDER: k8s.cluster.local
-        PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION: true
+    global:
+      # The address of the Istio CSR gRPC server
+      caAddress: cert-manager-istio-csr.istio-system.svc:443
   components:
     pilot:
       k8s:
         env:
-          - name: CERT_SIGNER_DOMAIN
-            value: venafi-cloud-issuer.cert-manager.io
-        overlays:
-          - apiVersion: apps/v1
-            kind: Deployment
-            name: istiod
-            patches:
-              - path: spec.template.spec.containers.[name:discovery].env.[name:PILOT_CERT_PROVIDER].value
-                value: k8s.cluster.local
-              - path: spec.template.spec.containers.[name:discovery].volumeMounts.[name:ca-certs]
-                value:
-                  name: ca-certs
-                  mountPath: /etc/ssl/certs/ca-certificates.crt
-                  readOnly: true
+          # Disable istiod CA Sever functionality
+        - name: ENABLE_CA_SERVER
+          value: "false"
 EOF
 
 # Install Istio
