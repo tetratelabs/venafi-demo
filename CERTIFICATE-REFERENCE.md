@@ -105,6 +105,8 @@ kubectl get events -n istio-system --field-selector reason=Issuing
 
 ### Sidecar Certificate Validation
 
+> **Important**: Ensure `istioctl` version compatibility. For TID 1.24.0, use `istioctl` 1.21.0+. Version mismatches cause "unknown field" errors.
+
 ```bash
 # View all certificate secrets in a specific workload
 istioctl proxy-config secret deployment/httpbin -n test-mtls

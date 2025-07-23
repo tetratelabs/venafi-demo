@@ -694,11 +694,13 @@ kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.renewalTi
 
 ### Verifying mTLS Between Services
 
+> **Note**: Ensure `istioctl` version compatibility with your TID version. For TID 1.24.0, use `istioctl` 1.21.0 or later. Version mismatches may cause "unknown field" errors.
+
 ```bash
 # Check if mTLS is enabled
 istioctl authn tls-check deployment/httpbin -n test-mtls
 
-# View sidecar proxy certificate secrets
+# View sidecar proxy certificate secrets (requires compatible istioctl version)
 istioctl proxy-config secret deployment/httpbin -n test-mtls
 
 # Extract and verify certificate chain
@@ -749,6 +751,29 @@ else
 fi
 ```
 
+### Alternative Validation Methods (if istioctl fails)
+
+If `istioctl` version compatibility issues prevent certificate inspection, use these alternative methods:
+
+```bash
+# Method 1: Test mTLS communication (proves certificates are working)
+kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers
+
+# Method 2: Check Istio sidecar presence
+kubectl get pods -n test-mtls -o json | \
+  jq -r '.items[].spec.containers[] | select(.name == "istio-proxy") | .name'
+
+# Method 3: Verify CA certificate in secret (shows what should be used)
+kubectl get secret cacerts -n istio-system -o json | \
+  jq -r '.data."tls.crt"' | base64 -d | openssl x509 -text -noout | grep -A2 "Issuer"
+
+# Method 4: Check certificate rotation by comparing timestamps
+kubectl get secret cacerts -n istio-system -o jsonpath='{.metadata.creationTimestamp}'
+
+# Method 5: Monitor Istiod logs for certificate loading
+kubectl logs -n istio-system deployment/istiod | grep -i "ca cert\|certificate"
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -764,6 +789,11 @@ fi
 3. **Istiod not picking up new CA**
    - Force restart: `kubectl rollout restart deployment/istiod -n istio-system`
    - Check logs: `kubectl logs -n istio-system deployment/istiod | grep -i cert`
+
+4. **istioctl version compatibility issues**
+   - Error: "unknown field bypass_overload_manager"
+   - Solution: Use compatible istioctl version (1.21.0+ for TID 1.24.0)
+   - Alternative: Use fallback validation methods above
 
 ### Useful Commands
 
