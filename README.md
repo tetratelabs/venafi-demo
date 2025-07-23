@@ -821,10 +821,47 @@ spec:
        summary: "Certificate {{ $labels.name }} expires in less than 7 days"
    ```
 
-2. **Rotation Failure Detection**:
+2. **Sidecar Certificate Validation**:
+   ```bash
+   # Create monitoring script for sidecar certificates
+   cat <<'EOF' > monitor-sidecar-certs.sh
+   #!/bin/bash
+   
+   # Check all deployments in a namespace for certificate health
+   NAMESPACE=${1:-default}
+   
+   for deployment in $(kubectl get deployments -n $NAMESPACE -o name | cut -d'/' -f2); do
+     echo "=== Checking $deployment ==="
+     
+     # Check if sidecar exists
+     if istioctl pc secret deployment/$deployment.$NAMESPACE >/dev/null 2>&1; then
+       # Get certificate serial and expiry
+       SERIAL=$(istioctl pc secret deployment/$deployment.$NAMESPACE -o json | \
+         jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+         base64 -d | openssl x509 -serial -noout 2>/dev/null)
+       
+       EXPIRY=$(istioctl pc secret deployment/$deployment.$NAMESPACE -o json | \
+         jq -r '.dynamicActiveSecrets[] | select(.name == "default") | .secret.tlsCertificate.certificateChain.inlineBytes' | \
+         base64 -d | openssl x509 -enddate -noout 2>/dev/null)
+       
+       echo "  Serial: $SERIAL"
+       echo "  Expiry: $EXPIRY"
+     else
+       echo "  No Istio sidecar found"
+     fi
+     echo ""
+   done
+   EOF
+   
+   chmod +x monitor-sidecar-certs.sh
+   ./monitor-sidecar-certs.sh test-mtls
+   ```
+
+3. **Rotation Failure Detection**:
    - Monitor cert-manager logs for errors
-   - Set up alerts for failed renewal attempts
+   - Set up alerts for failed renewal attempts  
    - Track certificate age metrics
+   - Validate sidecar certificate serial changes
 
 ### Backup and Recovery
 
