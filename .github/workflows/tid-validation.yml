@@ -1,0 +1,346 @@
+name: TID Installation and CA Rotation Validation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'README.md'
+      - '.github/workflows/tid-validation.yml'
+      - 'scripts/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'README.md'
+      - '.github/workflows/tid-validation.yml'
+      - 'scripts/**'
+  workflow_dispatch:
+
+env:
+  KIND_VERSION: v0.20.0
+  KUBERNETES_VERSION: v1.29.0
+  HELM_VERSION: v3.14.0
+  CERT_MANAGER_VERSION: v1.13.3
+  TID_VERSION: 1.24.0+tetrate0
+  TID_TAG: 1.24.0-tetrate0
+
+jobs:
+  validate-tid-installation:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Kind
+      uses: helm/kind-action@v1.9.0
+      with:
+        version: ${{ env.KIND_VERSION }}
+        node_image: kindest/node:${{ env.KUBERNETES_VERSION }}
+        cluster_name: tid-demo
+        config: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            kubeadmConfigPatches:
+            - |
+              kind: InitConfiguration
+              nodeRegistration:
+                kubeletExtraArgs:
+                  node-labels: "ingress-ready=true"
+            extraPortMappings:
+            - containerPort: 80
+              hostPort: 80
+              protocol: TCP
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: ${{ env.HELM_VERSION }}
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+
+    - name: Install istioctl
+      run: |
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.20.0 sh -
+        sudo mv istio-1.20.0/bin/istioctl /usr/local/bin/
+        istioctl version --remote=false
+
+    - name: Verify Cluster
+      run: |
+        kubectl cluster-info
+        kubectl get nodes
+
+    - name: Add Tetrate Helm Repository
+      run: |
+        helm repo add tetratelabs https://tis.tetrate.io/charts
+        helm repo update tetratelabs
+        helm search repo tetratelabs/base --versions
+
+    - name: Install TID Base Components
+      run: |
+        kubectl create namespace istio-system
+        helm install istio-base tetratelabs/base \
+          -n istio-system \
+          --set global.tag=${{ env.TID_TAG }} \
+          --set global.hub="containers.istio.tetratelabs.com" \
+          --version ${{ env.TID_VERSION }} \
+          --wait
+
+    - name: Create istiod Values File
+      run: |
+        cat <<EOF > istiod-values.yaml
+        global:
+          tag: ${{ env.TID_TAG }}
+          hub: "containers.istio.tetratelabs.com"
+        
+        pilot:
+          env:
+            AUTO_RELOAD_PLUGIN_CERTS: "true"
+            PILOT_CERT_CHECK_INTERVAL: "1m"
+        
+        meshConfig:
+          defaultConfig:
+            proxyStatsMatcher:
+              inclusionRegexps:
+              - ".*circuit_breakers.*"
+              - ".*osconfig.*"
+              - ".*outlier_detection.*"
+              - ".*_retry.*"
+        EOF
+
+    - name: Install TID Control Plane
+      run: |
+        helm install istiod tetratelabs/istiod \
+          -n istio-system \
+          -f istiod-values.yaml \
+          --version ${{ env.TID_VERSION }} \
+          --wait
+
+    - name: Install TID Gateway
+      run: |
+        kubectl create namespace istio-ingress
+        helm install istio-ingress tetratelabs/gateway \
+          -n istio-ingress \
+          --set global.tag=${{ env.TID_TAG }} \
+          --set global.hub="containers.istio.tetratelabs.com" \
+          --version ${{ env.TID_VERSION }} \
+          --wait
+
+    - name: Verify TID Installation
+      run: |
+        kubectl get pods -n istio-system
+        kubectl get pods -n istio-ingress
+        istioctl version
+
+    - name: Install cert-manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${{ env.CERT_MANAGER_VERSION }}/cert-manager.yaml
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=180s
+
+    - name: Setup CA Infrastructure
+      run: |
+        # Create Root CA
+        cat <<EOF | kubectl apply -f -
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: ClusterIssuer
+        metadata:
+          name: selfsigned-issuer
+        spec:
+          selfSigned: {}
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: Certificate
+        metadata:
+          name: root-ca
+          namespace: cert-manager
+        spec:
+          isCA: true
+          commonName: root-ca
+          secretName: root-ca-secret
+          duration: 87600h
+          renewBefore: 720h
+          privateKey:
+            algorithm: RSA
+            encoding: PKCS1
+            size: 4096
+          issuerRef:
+            name: selfsigned-issuer
+            kind: ClusterIssuer
+            group: cert-manager.io
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: ClusterIssuer
+        metadata:
+          name: root-ca-issuer
+        spec:
+          ca:
+            secretName: root-ca-secret
+        EOF
+        
+        # Wait for root CA to be ready
+        kubectl wait --for=condition=ready certificate/root-ca -n cert-manager --timeout=60s
+
+    - name: Setup Istio CA with Rotation
+      run: |
+        cat <<EOF | kubectl apply -f -
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: Certificate
+        metadata:
+          name: istio-ca
+          namespace: istio-system
+        spec:
+          isCA: true
+          commonName: istio-ca
+          secretName: cacerts
+          duration: 1440h
+          renewBefore: 360h
+          privateKey:
+            algorithm: RSA
+            encoding: PKCS1
+            size: 4096
+          issuerRef:
+            name: root-ca-issuer
+            kind: ClusterIssuer
+            group: cert-manager.io
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: Issuer
+        metadata:
+          name: istio-ca-issuer
+          namespace: istio-system
+        spec:
+          ca:
+            secretName: cacerts
+        EOF
+        
+        # Wait for Istio CA to be ready
+        kubectl wait --for=condition=ready certificate/istio-ca -n istio-system --timeout=60s
+
+    - name: Restart istiod to Load New CA
+      run: |
+        kubectl rollout restart deployment/istiod -n istio-system
+        kubectl rollout status deployment/istiod -n istio-system --timeout=180s
+
+    - name: Deploy Test Application
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: test-mtls
+          labels:
+            istio-injection: enabled
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: httpbin
+          namespace: test-mtls
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: httpbin
+          template:
+            metadata:
+              labels:
+                app: httpbin
+            spec:
+              containers:
+              - image: docker.io/kennethreitz/httpbin
+                name: httpbin
+                ports:
+                - containerPort: 80
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: httpbin
+          namespace: test-mtls
+        spec:
+          ports:
+          - name: http
+            port: 8000
+            targetPort: 80
+          selector:
+            app: httpbin
+        ---
+        apiVersion: security.istio.io/v1beta1
+        kind: PeerAuthentication
+        metadata:
+          name: default
+          namespace: test-mtls
+        spec:
+          mtls:
+            mode: STRICT
+        EOF
+        
+        # Wait for deployment to be ready
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=180s
+
+    - name: Verify mTLS and Certificate
+      run: |
+        # Check certificate status
+        kubectl get certificate -n istio-system istio-ca -o yaml
+        
+        # Check certificate expiry
+        kubectl get secret cacerts -n istio-system -o json | \
+          jq -r '.data."ca-cert.pem"' | \
+          base64 -d | \
+          openssl x509 -text -noout | \
+          grep -A2 "Validity"
+        
+        # Test mTLS communication
+        kubectl run curl-test --image=curlimages/curl:latest -n test-mtls --restart=Never -- \
+          curl -s http://httpbin:8000/headers
+        
+        # Wait for curl pod to complete
+        sleep 5
+        
+        # Check curl output
+        kubectl logs curl-test -n test-mtls
+        
+        # Cleanup test pod
+        kubectl delete pod curl-test -n test-mtls --ignore-not-found=true
+
+    - name: Run Certificate Rotation Test
+      run: |
+        echo "Current certificate details:"
+        kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.renewalTime}'
+        
+        # Force certificate renewal (for testing)
+        kubectl annotate certificate istio-ca -n istio-system \
+          cert-manager.io/issue-temporary-certificate="true" --overwrite
+        
+        # Wait a bit for cert-manager to process
+        sleep 30
+        
+        # Check if certificate was renewed
+        kubectl describe certificate istio-ca -n istio-system
+
+    - name: Collect Logs on Failure
+      if: failure()
+      run: |
+        echo "=== Istio System Pods ==="
+        kubectl get pods -n istio-system -o wide
+        
+        echo "=== Istiod Logs ==="
+        kubectl logs -n istio-system deployment/istiod --tail=100
+        
+        echo "=== Cert Manager Logs ==="
+        kubectl logs -n cert-manager deployment/cert-manager --tail=100
+        
+        echo "=== Test App Pods ==="
+        kubectl get pods -n test-mtls -o wide
+        
+        echo "=== Certificates Status ==="
+        kubectl get certificates -A
+        
+        echo "=== Istio Configuration ==="
+        istioctl analyze -A
