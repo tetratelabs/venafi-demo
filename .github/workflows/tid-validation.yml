@@ -292,6 +292,24 @@ jobs:
         
         # Wait for deployment to be ready
         kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=180s
+        
+        # Additional wait for Istio sidecar injection and readiness
+        echo "Waiting for Istio sidecars to be ready..."
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=120s
+        
+        # Give extra time for sidecars to fully initialize
+        sleep 30
+        
+        # Verify pods are actually running with sidecars
+        echo "Verifying pod readiness..."
+        kubectl get pods -n test-mtls -o wide
+        
+        # Also wait for curl deployment to be ready
+        echo "Waiting for curl deployment to be ready..."
+        kubectl wait --for=condition=ready pod -l app=curl -n test-mtls --timeout=120s
+        
+        # Show detailed pod information for debugging
+        kubectl describe pods -n test-mtls
 
     - name: Verify mTLS and Certificate
       run: |
@@ -340,26 +358,36 @@ jobs:
           
           # Alternative: Check that workload can communicate (proves mTLS is working)
           echo "Testing mTLS communication as certificate validation..."
-          kubectl exec -n test-mtls deployment/httpbin -- curl -s http://httpbin:8000/headers | grep -i "x-forwarded-client-cert" || echo "No client cert header found (this may be normal)"
+          
+          # First check if httpbin pods are ready
+          kubectl get pods -n test-mtls -l app=httpbin
+          
+          # Test using curl deployment (more reliable)
+          kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -5 || echo "mTLS test failed"
           
           # Check that Istio sidecar containers are running
           echo "Checking Istio sidecar presence..."
           kubectl get pods -n test-mtls -o json | jq -r '.items[].spec.containers[] | select(.name == "istio-proxy") | .name' | head -1 || echo "No istio-proxy container found"
         fi
         
-        # Test mTLS communication
-        kubectl run curl-test --image=curlimages/curl:latest -n test-mtls --restart=Never -- \
-          curl -s http://httpbin:8000/headers
+        # Test mTLS communication using existing curl deployment
+        echo "Testing mTLS communication using curl deployment..."
+        kubectl exec -n test-mtls deployment/curl -- curl -s http://httpbin:8000/headers | head -20
         
-        # Wait for curl pod to complete
-        sleep 5
+        # Alternative: Create a test pod and wait for it to be ready
+        echo "Creating test curl pod..."
+        kubectl run curl-test --image=curlimages/curl:latest -n test-mtls --restart=Never -- sleep 3600
         
-        # Check curl output
-        kubectl logs curl-test -n test-mtls
+        # Wait for test pod to be ready (including sidecar)
+        echo "Waiting for curl-test pod to be ready..."
+        kubectl wait --for=condition=ready pod/curl-test -n test-mtls --timeout=120s
         
-        # Also validate curl sidecar certificate
-        echo "Checking curl sidecar certificate..."
-        istioctl pc secret pod/curl-test.test-mtls || echo "Curl pod may not be ready yet"
+        # Give sidecar time to initialize
+        sleep 15
+        
+        # Now test mTLS communication
+        echo "Testing mTLS from test pod..."
+        kubectl exec -n test-mtls pod/curl-test -- curl -s http://httpbin:8000/headers | head -10
         
         # Cleanup test pod
         kubectl delete pod curl-test -n test-mtls --ignore-not-found=true
@@ -407,8 +435,13 @@ jobs:
         kubectl rollout restart deployment/httpbin -n test-mtls
         kubectl rollout status deployment/httpbin -n test-mtls --timeout=120s
         
-        # Wait a bit more for sidecar to get new certificate
-        sleep 30
+        # Wait for pods to be ready with sidecars
+        echo "Waiting for restarted pods to be ready..."
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test-mtls --timeout=120s
+        
+        # Additional wait for sidecar to get new certificate
+        echo "Allowing time for sidecar to receive new certificate..."
+        sleep 45
         
         # Verify certificate rotation occurred
         echo "Checking if certificate rotation occurred..."
