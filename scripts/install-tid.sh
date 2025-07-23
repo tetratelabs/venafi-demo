@@ -96,20 +96,6 @@ helm upgrade --install istiod tetratelabs/istiod \
     --version "$VERSION" \
     --wait
 
-# Create istio-ingress namespace
-echo ""
-echo "Creating istio-ingress namespace..."
-kubectl create namespace istio-ingress --dry-run=client -o yaml | kubectl apply -f -
-
-# Install Istio gateway
-echo ""
-echo "Installing Istio gateway..."
-helm upgrade --install istio-ingress tetratelabs/gateway \
-    -n istio-ingress \
-    --set global.tag="$TAG" \
-    --set global.hub="containers.istio.tetratelabs.com" \
-    --version "$VERSION" \
-    --wait
 
 # Verify installation
 echo ""
@@ -121,10 +107,6 @@ helm ls -A | grep -E "istio|NAME"
 echo ""
 echo "Istio system pods:"
 kubectl get pods -n istio-system
-
-echo ""
-echo "Istio ingress pods:"
-kubectl get pods -n istio-ingress
 
 # Check istioctl if available
 if command_exists istioctl; then

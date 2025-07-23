@@ -130,20 +130,9 @@ jobs:
           --version ${{ env.TID_VERSION }} \
           --wait
 
-    - name: Install TID Gateway
-      run: |
-        kubectl create namespace istio-ingress
-        helm install istio-ingress tetratelabs/gateway \
-          -n istio-ingress \
-          --set global.tag=${{ env.TID_TAG }} \
-          --set global.hub="containers.istio.tetratelabs.com" \
-          --version ${{ env.TID_VERSION }} \
-          --wait
-
     - name: Verify TID Installation
       run: |
         kubectl get pods -n istio-system
-        kubectl get pods -n istio-ingress
         istioctl version
 
     - name: Install cert-manager
