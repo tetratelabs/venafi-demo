@@ -107,7 +107,7 @@ fi
 
 # Test connectivity using Alpine curl
 echo -e "\n🌐 Testing mTLS Communication:"
-kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- \
-    curl -s httpbin:8000/headers >/dev/null 2>&1 && echo "✅ mTLS working" || echo "❌ mTLS failed"
+kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers
+ >/dev/null 2>&1 && echo "✅ mTLS working" || echo "❌ mTLS failed"
 
 echo -e "\n✨ Setup verification complete"
