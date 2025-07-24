@@ -118,13 +118,33 @@ jobs:
                 image: kennethreitz/httpbin
                 ports:
                 - containerPort: 80
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: curl-test
+          namespace: test
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: curl-test
+          template:
+            metadata:
+              labels:
+                app: curl-test
+            spec:
+              containers:
+              - name: netshoot
+                image: nicolaka/netshoot
+                command: ["sleep", "infinity"]
         EOF
         
         # Wait for deployment
         kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=120s
         
         # Test connectivity
-        kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- curl -s httpbin:8000/headers
+        kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers
 
     - name: Verify Sidecar Certificates
       run: |

@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+ISTIO_VERSION="1.25.2"
+export PATH=$PWD/istio-${ISTIO_VERSION}/bin:$PATH
+
 echo "=== Verifying Venafi + Istio Setup ==="
 
 # Check components
@@ -57,10 +60,34 @@ spec:
         image: kennethreitz/httpbin
         ports:
         - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curl-test
+  namespace: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curl-test
+  template:
+    metadata:
+      labels:
+        app: curl-test
+    spec:
+      containers:
+      - name: netshoot
+        image: nicolaka/netshoot
+        command: ["sleep", "infinity"]
 EOF
 
 # Wait for pod
 kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=60s >/dev/null 2>&1
+
+# Test connectivity
+kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers
+
 
 # Verify certificate with istioctl
 echo -e "\n🔍 Verifying Sidecar Certificate:"
