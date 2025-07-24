@@ -142,6 +142,7 @@ jobs:
         
         # Wait for deployment
         kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=120s
+        kubectl wait --for=condition=ready pod -l app=curl-test -n test --timeout=120s
         
         # Test connectivity
         kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers

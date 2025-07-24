@@ -84,6 +84,8 @@ EOF
 
 # Wait for pod
 kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=60s >/dev/null 2>&1
+kubectl wait --for=condition=ready pod -l app=curl-test -n test --timeout=120s >/dev/null 2>&1
+  
 
 # Test connectivity
 kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers
