@@ -140,24 +140,29 @@ spec:
 ### Rotation Process Timeline
 
 ```mermaid
-gantt
-    title CA Certificate Rotation (90-day lifecycle)
-    dateFormat DD
-    axisFormat Day %d
+timeline
+    title Certificate Rotation Timeline (90-day lifecycle)
     
-    section Current Cert
-    Active Certificate : active, cert1, 00, 90d
-    Renewal Period     : crit, renewal1, 75d, 15d
+    section Day 0-74
+        Certificate Active  : Valid CA certificate
+                           : Workloads using current CA
+                           : Normal operations
     
-    section New Cert  
-    Certificate Issued : milestone, issue, 75d
-    Overlapping Period : active, overlap, 75d, 15d
-    Active Certificate : active, cert2, after overlap, 75d
+    section Day 75
+        Renewal Triggered  : cert-manager checks renewBefore
+                          : Creates new CertificateRequest
+                          : Venafi issues new certificate
     
-    section Events
-    cert-manager Check : milestone, 00d
-    Renewal Triggered  : milestone, 75d
-    Old Cert Expires   : milestone, 90d
+    section Day 75-89
+        Overlap Period    : Both certificates valid
+                         : istiod loads new CA
+                         : New workload certs use new CA
+                         : Old certs still trusted
+    
+    section Day 90
+        Old Cert Expires  : Original certificate expires
+                         : Only new CA trusted
+                         : Rotation complete
 ```
 
 ### Detailed Rotation Sequence
