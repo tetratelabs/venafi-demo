@@ -22,7 +22,7 @@ export VENAFI_ZONE="Your\\Organization\\Project"
 graph LR
     VC[Venafi Cloud] --> CM[cert-manager]
     CM --> Secret[cacerts]
-    Secret --> Istiod[istiod/AUTO_RELOAD]
+    Secret --> Istiod[istiod]
     Istiod --> Workloads[Pods]
 ```
 
@@ -30,8 +30,8 @@ graph LR
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| cert-manager | v1.16.2 | Certificate lifecycle management |
-| Istio | 1.24.2 | Service mesh with auto-reload |
+| cert-manager | v1.18.2 | Certificate lifecycle management |
+| Istio | 1.25.2 | Service mesh (auto-reloads certificates) |
 | Venafi Cloud | Latest | Enterprise certificate authority |
 
 ## Configuration

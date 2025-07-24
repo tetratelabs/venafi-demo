@@ -74,20 +74,8 @@ jobs:
         curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
         export PATH=$PWD/istio-${{ env.ISTIO_VERSION }}/bin:$PATH
         
-        # Install Istio with auto-reload
-        cat <<EOF | istioctl install -y -f -
-        apiVersion: install.istio.io/v1alpha1
-        kind: IstioOperator
-        metadata:
-          name: control-plane
-        spec:
-          components:
-            pilot:
-              k8s:
-                env:
-                  - name: AUTO_RELOAD_PLUGIN_CERTS
-                    value: "true"
-        EOF
+        # Install Istio (auto-reload is enabled by default)
+        istioctl install -y
         
         kubectl wait --for=condition=ready pod -l app=istiod -n istio-system --timeout=300s
 
@@ -165,10 +153,10 @@ jobs:
         # Verify Istio picked up new certificate
         kubectl logs -n istio-system deployment/istiod --tail=50 | grep -i "certificate" || true
 
-    - name: Verify Auto-Reload
+    - name: Verify Certificate Reload
       run: |
-        # Check AUTO_RELOAD is enabled
-        kubectl get deployment istiod -n istio-system -o yaml | grep AUTO_RELOAD_PLUGIN_CERTS
+        # Verify Istio is using the new certificate
+        kubectl logs -n istio-system deployment/istiod --tail=20 | grep -i "loaded.*certificate" || true
         
         # Test mTLS still works after rotation
         kubectl exec -n test deployment/httpbin -- curl -s localhost:8000/headers

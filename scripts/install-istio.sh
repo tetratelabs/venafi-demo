@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install Istio with automatic certificate reloading
+# Install Istio (automatic certificate reloading is enabled by default)
 ISTIO_VERSION="1.25.2"
 
 echo "Installing Istio ${ISTIO_VERSION}..."
@@ -19,22 +19,10 @@ if ! kubectl get secret cacerts -n istio-system >/dev/null 2>&1; then
     exit 1
 fi
 
-# Install Istio with auto-reload
-cat <<EOF | istioctl install -y -f -
-apiVersion: install.istio.io/v1alpha1
-kind: IstioOperator
-metadata:
-  name: control-plane
-spec:
-  components:
-    pilot:
-      k8s:
-        env:
-          - name: AUTO_RELOAD_PLUGIN_CERTS
-            value: "true"
-EOF
+# Install Istio (default configuration)
+istioctl install -y
 
 # Wait for istiod
 kubectl wait --for=condition=ready pod -l app=istiod -n istio-system --timeout=300s
 
-echo "✅ Istio installed with auto-reload enabled"
+echo "✅ Istio installed (certificate auto-reload is enabled by default)"
