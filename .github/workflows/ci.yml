@@ -1,0 +1,176 @@
+name: CI - Istio CA Rotation Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  KIND_VERSION: v0.29.0
+  KUBERNETES_VERSION: v1.32.5
+  CERT_MANAGER_VERSION: v1.18.2
+  ISTIO_VERSION: 1.25.2
+
+jobs:
+  test-ca-rotation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Kind
+      run: |
+        curl -Lo ./kind https://github.com/kubernetes-sigs/kind/releases/download/${{ env.KIND_VERSION }}/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+
+    - name: Create Cluster
+      run: |
+        kind create cluster --name test --wait 300s
+        kubectl cluster-info
+
+    - name: Install cert-manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${{ env.CERT_MANAGER_VERSION }}/cert-manager.yaml
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
+
+    - name: Setup Self-Signed CA
+      run: |
+        kubectl create namespace istio-system
+        
+        # Create self-signed issuer
+        cat <<EOF | kubectl apply -f -
+        apiVersion: cert-manager.io/v1
+        kind: ClusterIssuer
+        metadata:
+          name: self-signed-issuer
+        spec:
+          selfSigned: {}
+        ---
+        apiVersion: cert-manager.io/v1
+        kind: Certificate
+        metadata:
+          name: istio-ca
+          namespace: istio-system
+        spec:
+          secretName: cacerts
+          duration: 2160h    # 90 days
+          renewBefore: 360h  # 15 days
+          isCA: true
+          commonName: istio-ca
+          issuerRef:
+            name: self-signed-issuer
+            kind: ClusterIssuer
+        EOF
+        
+        kubectl wait --for=condition=ready certificate/istio-ca -n istio-system --timeout=120s
+
+    - name: Install Istio
+      run: |
+        # Install istioctl
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
+        export PATH=$PWD/istio-${{ env.ISTIO_VERSION }}/bin:$PATH
+        
+        # Install Istio (auto-reload is enabled by default)
+        istioctl install -y
+        
+        kubectl wait --for=condition=ready pod -l app=istiod -n istio-system --timeout=300s
+
+    - name: Test mTLS
+      run: |
+        # Create test namespace
+        kubectl create namespace test
+        kubectl label namespace test istio-injection=enabled
+        
+        # Deploy test app
+        kubectl apply -f - <<EOF
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: httpbin
+          namespace: test
+        spec:
+          ports:
+          - port: 8000
+            targetPort: 80
+          selector:
+            app: httpbin
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: httpbin
+          namespace: test
+        spec:
+          selector:
+            matchLabels:
+              app: httpbin
+          template:
+            metadata:
+              labels:
+                app: httpbin
+            spec:
+              containers:
+              - name: httpbin
+                image: kennethreitz/httpbin
+                ports:
+                - containerPort: 80
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: curl-test
+          namespace: test
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: curl-test
+          template:
+            metadata:
+              labels:
+                app: curl-test
+            spec:
+              containers:
+              - name: netshoot
+                image: nicolaka/netshoot
+                command: ["sleep", "infinity"]
+        EOF
+        
+        # Wait for deployment
+        kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=120s
+        kubectl wait --for=condition=ready pod -l app=curl-test -n test --timeout=120s
+        
+        # Test connectivity
+        kubectl exec -n test deploy/curl-test -- curl -s httpbin:8000/headers
+
+    - name: Verify Sidecar Certificates
+      run: |
+        # Verify certificates are loaded in sidecar
+        export PATH=$PWD/istio-${{ env.ISTIO_VERSION }}/bin:$PATH
+        echo "Sidecar certificate secrets:"
+        istioctl pc secret deploy/httpbin -n test
+        
+        # Extract certificate issuer
+        echo "Certificate issuer:"
+        istioctl pc secret deploy/httpbin -n test --output json | \
+          jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
+          base64 -d | openssl x509 -issuer -noout
+
+    - name: Collect Logs on Failure
+      if: failure()
+      run: |
+        echo "=== cert-manager logs ==="
+        kubectl logs -n cert-manager deployment/cert-manager --tail=100
+        
+        echo "=== istiod logs ==="
+        kubectl logs -n istio-system deployment/istiod --tail=100
+        
+        echo "=== Certificate status ==="
+        kubectl describe certificate istio-ca -n istio-system
+        
+        echo "=== Pods status ==="
+        kubectl get pods -A
