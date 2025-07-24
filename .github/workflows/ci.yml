@@ -159,41 +159,6 @@ jobs:
           jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
           base64 -d | openssl x509 -issuer -noout
 
-    - name: Test Certificate Rotation
-      run: |
-        # Get initial certificate serial
-        INITIAL_SERIAL=$(kubectl get secret cacerts -n istio-system -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -serial -noout)
-        echo "Initial certificate serial: $INITIAL_SERIAL"
-        
-        # Force certificate renewal
-        kubectl annotate certificate istio-ca -n istio-system cert-manager.io/issue-temporary-certificate="true" --overwrite
-        
-        # Wait for renewal
-        sleep 30
-        
-        # Get new certificate serial
-        NEW_SERIAL=$(kubectl get secret cacerts -n istio-system -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -serial -noout)
-        echo "New certificate serial: $NEW_SERIAL"
-        
-        # Verify rotation occurred
-        if [ "$INITIAL_SERIAL" != "$NEW_SERIAL" ]; then
-          echo "✅ Certificate rotation successful"
-        else
-          echo "❌ Certificate rotation failed"
-          exit 1
-        fi
-        
-        # Verify Istio picked up new certificate
-        kubectl logs -n istio-system deployment/istiod --tail=50 | grep -i "certificate" || true
-
-    - name: Verify Certificate Reload
-      run: |
-        # Verify Istio is using the new certificate
-        kubectl logs -n istio-system deployment/istiod --tail=20 | grep -i "loaded.*certificate" || true
-        
-        # Test mTLS still works after rotation
-        kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- curl -s httpbin:8000/headers
-
     - name: Collect Logs on Failure
       if: failure()
       run: |

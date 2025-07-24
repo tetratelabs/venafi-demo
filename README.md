@@ -213,9 +213,6 @@ kubectl get certificate istio-ca -n istio-system
 # Expiry date
 kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.notAfter}'
 
-# Force renewal (testing)
-kubectl annotate certificate istio-ca -n istio-system \
-  cert-manager.io/issue-temporary-certificate="true" --overwrite
 ```
 
 ### Troubleshooting
