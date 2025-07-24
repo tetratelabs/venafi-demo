@@ -124,7 +124,20 @@ jobs:
         kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=120s
         
         # Test connectivity
-        kubectl exec -n test deployment/httpbin -- curl -s localhost:8000/headers
+        kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- curl -s httpbin:8000/headers
+
+    - name: Verify Sidecar Certificates
+      run: |
+        # Verify certificates are loaded in sidecar
+        export PATH=$PWD/istio-${{ env.ISTIO_VERSION }}/bin:$PATH
+        echo "Sidecar certificate secrets:"
+        istioctl pc secret deploy/httpbin -n test
+        
+        # Extract certificate issuer
+        echo "Certificate issuer:"
+        istioctl pc secret deploy/httpbin -n test --output json | \
+          jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
+          base64 -d | openssl x509 -issuer -noout
 
     - name: Test Certificate Rotation
       run: |
@@ -159,7 +172,7 @@ jobs:
         kubectl logs -n istio-system deployment/istiod --tail=20 | grep -i "loaded.*certificate" || true
         
         # Test mTLS still works after rotation
-        kubectl exec -n test deployment/httpbin -- curl -s localhost:8000/headers
+        kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- curl -s httpbin:8000/headers
 
     - name: Collect Logs on Failure
       if: failure()

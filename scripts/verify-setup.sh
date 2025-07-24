@@ -21,7 +21,7 @@ echo -e "\n📅 Certificate Expiry:"
 kubectl get certificate istio-ca -n istio-system -o jsonpath='{.status.notAfter}' | xargs -I {} echo "Expires: {}"
 
 # Test workload
-echo -e "\n🧪 Testing mTLS:"
+echo -e "\n🧪 Deploying Test Application:"
 kubectl create namespace test --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
 kubectl label namespace test istio-injection=enabled --overwrite >/dev/null 2>&1
 
@@ -62,7 +62,25 @@ EOF
 # Wait for pod
 kubectl wait --for=condition=ready pod -l app=httpbin -n test --timeout=60s >/dev/null 2>&1
 
-# Test connectivity
-kubectl exec -n test deployment/httpbin -- curl -s localhost:8000/headers >/dev/null 2>&1 && echo "✅ mTLS working" || echo "❌ mTLS failed"
+# Verify certificate with istioctl
+echo -e "\n🔍 Verifying Sidecar Certificate:"
+if command -v istioctl >/dev/null 2>&1; then
+    # Get certificate details
+    echo "Certificate chain from sidecar:"
+    istioctl pc secret deploy/httpbin -n test | grep -E "(default|ROOTCA)" || echo "No certificates found"
+    
+    # Extract and display certificate issuer
+    echo -e "\nCertificate issuer details:"
+    istioctl pc secret deploy/httpbin -n test --output json | \
+        jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' 2>/dev/null | \
+        base64 -d | openssl x509 -issuer -noout 2>/dev/null || echo "Could not extract issuer"
+else
+    echo "❌ istioctl not found - cannot verify sidecar certificates"
+fi
+
+# Test connectivity using Alpine curl
+echo -e "\n🌐 Testing mTLS Communication:"
+kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- \
+    curl -s httpbin:8000/headers >/dev/null 2>&1 && echo "✅ mTLS working" || echo "❌ mTLS failed"
 
 echo -e "\n✨ Setup verification complete"

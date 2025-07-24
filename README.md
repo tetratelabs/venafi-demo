@@ -223,6 +223,18 @@ kubectl logs -n cert-manager deployment/cert-manager
 
 # Istio certificate reload
 kubectl logs -n istio-system deployment/istiod | grep -i cert
+
+# Verify sidecar certificates
+istioctl pc secret deploy/httpbin -n test
+
+# Extract certificate issuer from sidecar
+istioctl pc secret deploy/httpbin -n test --output json | \
+  jq -r '.dynamicActiveSecrets[0].secret.tlsCertificate.certificateChain.inlineBytes' | \
+  base64 -d | openssl x509 -issuer -noout
+
+# Test mTLS with Alpine curl
+kubectl run -n test curl-test --rm -i --image curlimages/curl --restart=Never -- \
+  curl -s httpbin:8000/headers
 ```
 
 ## Technical Details
