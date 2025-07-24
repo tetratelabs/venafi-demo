@@ -137,9 +137,66 @@ spec:
 
 ## Certificate Lifecycle
 
-- **Day 0**: Certificate issued (90-day validity)
-- **Day 75**: Automatic renewal starts (15 days before expiry)
-- **Day 90**: Old certificate expires
+### Rotation Process Timeline
+
+```mermaid
+gantt
+    title CA Certificate Rotation (90-day lifecycle)
+    dateFormat DD
+    axisFormat Day %d
+    
+    section Current Cert
+    Active Certificate : active, cert1, 00, 90d
+    Renewal Period     : crit, renewal1, 75d, 15d
+    
+    section New Cert  
+    Certificate Issued : milestone, issue, 75d
+    Overlapping Period : active, overlap, 75d, 15d
+    Active Certificate : active, cert2, after overlap, 75d
+    
+    section Events
+    cert-manager Check : milestone, 00d
+    Renewal Triggered  : milestone, 75d
+    Old Cert Expires   : milestone, 90d
+```
+
+### Detailed Rotation Sequence
+
+```mermaid
+sequenceDiagram
+    participant Timer as cert-manager<br/>Reconciliation Loop
+    participant CM as cert-manager<br/>Controller
+    participant Venafi as Venafi Cloud
+    participant K8s as Kubernetes API
+    participant Istiod as istiod Process
+    participant Envoy as Envoy Proxies
+
+    Note over Timer: Day 75 (renewBefore threshold)
+    Timer->>CM: Check Certificate istio-ca<br/>Now > (NotAfter - renewBefore)
+    CM->>CM: Trigger Renewal<br/>Create CertificateRequest
+
+    Note over CM,Venafi: Certificate Renewal
+    CM->>Venafi: POST /v1/certificaterequests<br/>New CA certificate
+    Venafi-->>CM: New Certificate<br/>Valid from: Day 75<br/>Valid to: Day 165
+    
+    Note over CM,K8s: Secret Update
+    CM->>K8s: Update Secret cacerts<br/>Atomic operation
+    K8s->>K8s: Update revision<br/>Trigger volume update
+
+    Note over Istiod: Automatic Reload
+    Istiod->>Istiod: inotify on /etc/cacerts<br/>Detect file change
+    Istiod->>Istiod: Load new certificates<br/>ca-cert.pem (new)<br/>ca-key.pem (new)
+    Istiod->>Istiod: Log: "Loaded root cert"<br/>Start using new CA
+
+    Note over Envoy: Workload Certificates
+    loop Every 12 hours (cert refresh)
+        Envoy->>Istiod: CSR via SDS
+        Istiod-->>Envoy: New workload cert<br/>Signed by NEW CA
+    end
+    
+    Note over Envoy: Graceful Transition
+    Envoy->>Envoy: Trust both CAs<br/>Old (until Day 90)<br/>New (from Day 75)
+```
 
 ## Operations
 
@@ -166,6 +223,52 @@ kubectl logs -n cert-manager deployment/cert-manager
 
 # Istio certificate reload
 kubectl logs -n istio-system deployment/istiod | grep -i cert
+```
+
+## Technical Details
+
+### Secret Structure
+
+The `cacerts` secret in `istio-system` contains:
+
+| File | Purpose | Format |
+|------|---------|--------|
+| `ca-cert.pem` | Root certificate | PEM-encoded X.509 |
+| `ca-key.pem` | Private key for CA | PEM-encoded RSA/ECDSA |
+| `cert-chain.pem` | Full certificate chain | PEM-encoded chain |
+| `tls.crt` | Same as ca-cert.pem | PEM-encoded X.509 |
+| `tls.key` | Same as ca-key.pem | PEM-encoded key |
+
+### istiod Certificate Loading
+
+```yaml
+# istiod deployment volume configuration
+volumes:
+- name: cacerts
+  secret:
+    secretName: cacerts
+    items:
+    - key: ca-cert.pem
+      path: ca-cert.pem
+    - key: ca-key.pem
+      path: ca-key.pem
+    - key: cert-chain.pem
+      path: cert-chain.pem
+```
+
+### Workload Certificate Details
+
+```bash
+# Example workload certificate
+Subject: URI=spiffe://cluster.local/ns/test/sa/httpbin
+Issuer: CN=istio-ca
+Validity:
+  Not Before: Nov 20 10:00:00 2024 GMT
+  Not After: Nov 21 10:00:00 2024 GMT (24h)
+X509v3 extensions:
+  X509v3 Key Usage: Digital Signature, Key Encipherment
+  X509v3 Extended Key Usage: TLS Web Server Authentication, TLS Web Client Authentication
+  X509v3 Subject Alternative Name: URI:spiffe://cluster.local/ns/test/sa/httpbin
 ```
 
 ## Testing
